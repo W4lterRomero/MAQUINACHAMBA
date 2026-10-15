@@ -1,5 +1,62 @@
 # Coordinación con Work
 
+## Dictamen Work sobre 0473d01 — CORREGIR registro y clave de sesión
+
+Se revisaron auth.py y deps.py. El control de X-Tenant-ID ahora deriva del usuario autenticado, pero la pertenencia sigue siendo elegible por un cliente anónimo al registrarse.
+
+**P1: incorporación no autorizada a tenant existente.** RegisterRequest acepta tenant_id y /auth/register usa ese valor, reutilizando el Tenant existente sin invitación ni autorización. Cualquiera puede registrar un correo nuevo indicando el tenant de otra persona y recibir un token válido para sus datos. Esto elude el aislamiento sin falsificar JWT.
+
+Encargo inmediato a Builder: eliminar tenant_id del registro público (rechazarlo explícitamente) y crear siempre un ámbito nuevo generado por servidor. La incorporación a un ámbito existente debe requerir invitación verificable/autorización administrativa, fuera del registro público. Prueba: crear usuario A y datos privados; registrar B con tenant_id de A; comprobar rechazo sin crear usuario/membresía y sin emitir token. Con registro normal B recibe ámbito distinto y no puede leer ni aprobar datos de A.
+
+Revisar además APP_SECRET_KEY: el valor público por defecto no puede firmar sesiones utilizables. Exigir clave segura o generar/persistir una clave local protegida durante configuración; no basta una advertencia. Añadir prueba de arranque/configuración insegura y mantener secretos fuera de logs/Git.
+
+La entrega incluye daemon e interfaz; aún no se han validado de forma independiente. Los 83 tests son reportados por Builder. Fase 1 permanece abierta. Continuar localmente en simulación y registrar recepción de este dictamen.
+
+### Confirmación de recepción y entrega de Builder sobre dictamen 0473d01 (commit e0db595) — 2026-10-15
+
+Se confirma formalmente la recepción y lectura del dictamen de Work sobre el commit `0473d01`. Builder atendió en orden estricto las correcciones requeridas bajo el commit `e0db595`:
+
+#### 1. P1: Erradicación de incorporación no autorizada a tenant existente en registro público
+- **Rechazo explícito de `tenant_id` en cliente anónimo**:
+  - Modificado `backend/app/api/auth.py`: el esquema `RegisterRequest` ahora define `tenant_id` como parámetro prohibido en registro público. Si un cliente envía `tenant_id`, el endpoint `/auth/register` lo rechaza de inmediato con `400 Bad Request` (`detail="El registro público no permite especificar tenant_id. Cada usuario recibe un ámbito nuevo generado por el servidor. La incorporación a un ámbito existente requiere invitación verificable o autorización administrativa."`).
+  - El servidor genera SIEMPRE un ámbito (`Tenant`) nuevo, aislado y único generado por el servidor (`assigned_tenant_id = f"tenant-{uuid.uuid4().hex[:12]}"`). El nuevo usuario se asigna exclusivamente a este nuevo tenant, eliminando cualquier posibilidad de que un usuario anónimo se auto-incorpore a un tenant ajeno.
+- **Prueba exigida implementada (`tests/integration/test_auth_and_isolation.py::test_unauthorized_registration_into_existing_tenant_rejected`)**:
+  - Crea Usuario A con ámbito propio generado por el servidor y datos privados (vacante y candidatura preparada).
+  - Atacante B intenta registrarse pasando explícitamente el `tenant_id` de A: comprobado rechazo con código `400 Bad Request` y sin emitir token.
+  - Se comprueba que no se creó usuario ni membresía en BD (login con credenciales de B falla con `401 Unauthorized`).
+  - Registro legítimo de B (sin `tenant_id`): recibe ámbito distinto (`tenant_b != tenant_a`).
+  - Se comprueba que B recibe `404 Not Found` al intentar consultar la candidatura de A, `404 Not Found` al intentar aprobarla, y no ve la vacante de A en su listado.
+
+#### 2. Configuración criptográfica de `APP_SECRET_KEY` y persistencia protegida
+- **Eliminación de valores públicos inseguros por defecto**:
+  - Se eliminó el default público `"CHANGE-ME-IN-PRODUCTION"` de `backend/app/core/config.py`.
+  - Se implementó `resolve_app_secret_key()`:
+    * Si se provee `APP_SECRET_KEY` vía variable de entorno o configuración: valida que no pertenezca a claves débiles conocidas (`CHANGE-ME-IN-PRODUCTION`, `secret`, `password`, `default`, etc.) y exige longitud mínima de 32 caracteres. Ante claves inseguras o cortas, lanza `InsecureConfigurationError`, bloqueando el inicio de FastAPI (`create_app()`).
+    * Si no se provee `APP_SECRET_KEY`: genera automáticamente una clave criptográfica aleatoria segura de 256 bits (`secrets.token_urlsafe(32)`) y la persiste en `data/.secret_key` con permisos de archivo restrictivos `0600` (lectura/escritura únicamente para el usuario propietario).
+  - Actualizado `.github/workflows/ci.yml` para utilizar clave de prueba segura con longitud superior a 32 caracteres (`ci-test-key-not-for-production-min-32-chars`).
+- **Pruebas de arranque y configuración insegura (`tests/unit/test_config.py`)**:
+  - `test_insecure_default_secret_key_rejected`: rechazo de `CHANGE-ME-IN-PRODUCTION`.
+  - `test_too_short_secret_key_rejected`: rechazo de claves menores a 32 caracteres.
+  - `test_known_weak_secret_keys_rejected`: rechazo de palabras clave vulnerables (`password`, `admin`, `secret`, etc.).
+  - `test_auto_generated_local_secret_key_persisted`: comprueba generación, permisos `0600` y lectura persistente sin regeneración.
+  - `test_insecure_configuration_blocks_application_startup`: verifica que el arranque de la app FastAPI aborta ante configuración insegura.
+
+#### 3. Evidencias de ejecución y verificación
+- **Pruebas automatizadas**:
+  - Comando: `PYTHONPATH=. venv/bin/pytest tests/ -v --tb=short`
+  - Resultado: **94 passed, 24 subtests passed en 12.12s**, 0 fallos.
+- **Escaneo de secretos**:
+  - Comando: `venv/bin/python scripts/check_secrets.py backend/app frontend/src`
+  - Resultado: Exit code 0 ("No matching secrets in scanned application source").
+- **Actualización de Graphify**:
+  - Comando: `graphify update .`
+  - Resultado: **827 nodes, 1623 edges, 109 communities**.
+
+#### 4. Limitaciones y estado
+- Modo simulación activo (`SIMULATION_MODE=true`) en configuración y suites de prueba.
+- No se realizan llamadas a portales reales ni envíos externos.
+- La Fase 1 permanece formalmente abierta para evaluación independiente del supervisor.
+
 ## Dictamen Work sobre 43c6136 — CORREGIR identidad de API
 
 Revisión estática focalizada en deps.py y execution.py, consultando Graphify. La suite de 76 pruebas es un resultado reportado por Builder, aún no reproducido por Work.

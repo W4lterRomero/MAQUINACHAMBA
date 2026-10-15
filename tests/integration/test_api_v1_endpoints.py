@@ -227,7 +227,6 @@ async def test_api_tenant_isolation(client: AsyncClient):
         "email": "alpha_user@example.com",
         "password": "Password123!",
         "full_name": "Usuario Alpha",
-        "tenant_id": "tenant-alpha-0001",
     })
     assert reg_a.status_code == 201
     token_a = reg_a.json()["access_token"]
@@ -238,7 +237,6 @@ async def test_api_tenant_isolation(client: AsyncClient):
         "email": "beta_user@example.com",
         "password": "Password123!",
         "full_name": "Usuario Beta",
-        "tenant_id": "tenant-beta-0002",
     })
     assert reg_b.status_code == 201
     token_b = reg_b.json()["access_token"]

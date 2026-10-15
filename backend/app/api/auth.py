@@ -26,7 +26,10 @@ class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8)
     full_name: str = Field(default="", max_length=255)
-    tenant_id: Optional[str] = None
+    tenant_id: Optional[str] = Field(
+        default=None,
+        description="Parámetro prohibido en registro público. La incorporación a un tenant existente requiere invitación.",
+    )
 
 
 class LoginRequest(BaseModel):
@@ -59,9 +62,20 @@ async def register(
     session: AsyncSession = Depends(get_session),
 ):
     """
-    Registra un nuevo usuario en su tenant.
-    Si no se especifica tenant_id, genera uno automáticamente y crea el registro de Tenant.
+    Registra un nuevo usuario en un nuevo ámbito (tenant) generado exclusivamente por el servidor.
+    El registro público rechaza explícitamente cualquier tenant_id para prevenir accesos no autorizados a tenants ajenos.
     """
+    # REQ: P1 Dictamen Work sobre 0473d01 - Rechazar explícitamente tenant_id en registro público
+    if request.tenant_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "El registro público no permite especificar tenant_id. "
+                "Cada usuario recibe un ámbito nuevo generado por el servidor. "
+                "La incorporación a un ámbito existente requiere invitación verificable o autorización administrativa."
+            ),
+        )
+
     # Verificar si el correo ya existe
     existing_user = await session.execute(
         select(User).where(User.email == request.email)
@@ -72,21 +86,16 @@ async def register(
             detail="Ya existe una cuenta con este correo electrónico.",
         )
 
-    assigned_tenant_id = request.tenant_id or f"tenant-{uuid.uuid4().hex[:12]}"
+    # Ámbito nuevo generado exclusivamente por el servidor
+    assigned_tenant_id = f"tenant-{uuid.uuid4().hex[:12]}"
 
-    # Verificar o crear el Tenant
-    tenant_stmt = select(Tenant).where(Tenant.id == assigned_tenant_id)
-    tenant_res = await session.execute(tenant_stmt)
-    tenant = tenant_res.scalar_one_or_none()
-
-    if not tenant:
-        tenant = Tenant(
-            id=assigned_tenant_id,
-            tenant_id=assigned_tenant_id,
-            name=f"Tenant de {request.email}",
-        )
-        session.add(tenant)
-        await session.flush()
+    tenant = Tenant(
+        id=assigned_tenant_id,
+        tenant_id=assigned_tenant_id,
+        name=f"Tenant de {request.email}",
+    )
+    session.add(tenant)
+    await session.flush()
 
     new_user = User(
         id=str(uuid.uuid4()),

@@ -30,7 +30,7 @@ jobs:
         env:
           SIMULATION_MODE: "true"
           DATABASE_URL: "sqlite+aiosqlite:///./test.db"
-          APP_SECRET_KEY: "ci-test-key-not-for-production"
+          APP_SECRET_KEY: "ci-test-key-not-for-production-min-32-chars"
         run: |
           python -m pytest tests/ -v --tb=short
 
