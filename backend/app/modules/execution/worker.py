@@ -107,11 +107,16 @@ class DurableExecutionWorker:
                 ScheduledTask.locked_by == self.worker_id,
                 ScheduledTask.fence_token == fence_token,
                 ScheduledTask.status == "executing",
+                or_(
+                    ScheduledTask.lease_expires_at.is_(None),
+                    ScheduledTask.lease_expires_at > now,
+                ),
             )
             .values(
                 locked_at=now,
                 lease_expires_at=new_expires,
             )
+            .execution_options(synchronize_session=False)
         )
         res = await session.execute(stmt)
         await session.commit()
@@ -123,16 +128,18 @@ class DurableExecutionWorker:
         task: ScheduledTask,
         window_start: time = time(9, 0),
         window_end: time = time(18, 0),
+        expected_fence_token: Optional[int] = None,
     ) -> Tuple[bool, str]:
         """
         Ejecuta una tarea previamente reclamada siguiendo todos los controles de seguridad,
         persistencia de intención previa al despacho, manejo de excepciones y fencing.
         """
         start_dt = self.clock.now_utc()
+        task_id = str(task.id)
 
         # 0. P0: Validar estado y propiedad persistidos (P0 - Reejecución sin propiedad)
         task_res = await session.execute(
-            select(ScheduledTask).where(ScheduledTask.id == task.id)
+            select(ScheduledTask).where(ScheduledTask.id == task_id)
         )
         persisted_task = task_res.scalar_one_or_none()
         if not persisted_task:
@@ -150,7 +157,14 @@ class DurableExecutionWorker:
                 f"no por '{self.worker_id}'."
             )
 
-        my_fence_token = self.active_fence_tokens.get(persisted_task.id, persisted_task.fence_token)
+        # Token de claim propio y activo: falla cerrado si el worker no lo posee.
+        # PROHIBIDO adoptar el token persistido en BD como sustituto de un claim propio.
+        my_fence_token = expected_fence_token if expected_fence_token is not None else self.active_fence_tokens.get(persisted_task.id)
+        if my_fence_token is None:
+            return False, (
+                f"Worker '{self.worker_id}' no posee un claim activo (fencing token) para la tarea '{persisted_task.id}'. "
+                f"Prohibido adoptar el token de base de datos como sustituto."
+            )
 
         # 1. P0: Defensa contra ejecución anticipada (comienzo de ventana e instante UTC)
         if SchedulingService.is_premature(persisted_task, execution_window_start=window_start, clock=self.clock):
@@ -262,13 +276,54 @@ class DurableExecutionWorker:
             return False, f"Bloqueo de seguridad: {reason_effect}"
 
         # =========================================================================
-        # 5. P0: PERSISTENCIA DEL INTENTO ANTES DE CONTACTAR AL PORTAL
-        # Previene que una caída durante o tras el efecto en el portal sea tomada
-        # como 'segura para reintentar' por mera ausencia de log.
+        # 5. P0: TRANSICIÓN ATÓMICA DE PREDESPACHO
+        # UPDATE condicional con verificación atómica de:
+        # - status == "executing"
+        # - locked_by == self.worker_id
+        # - fence_token == my_fence_token
+        # - dispatch_in_flight == False
+        # - lease vigente (lease_expires_at > now o lease_expires_at is None)
+        # Exige exactamente una fila modificada antes de invocar al adaptador.
         # =========================================================================
         dispatch_attempt_id = f"disp-{uuid.uuid4().hex[:12]}"
+        now_pre = self.clock.now_utc()
+
+        predispatch_stmt = (
+            update(ScheduledTask)
+            .where(
+                ScheduledTask.id == persisted_task.id,
+                ScheduledTask.status == "executing",
+                ScheduledTask.locked_by == self.worker_id,
+                ScheduledTask.fence_token == my_fence_token,
+                ScheduledTask.dispatch_in_flight.is_(False),
+                or_(
+                    ScheduledTask.lease_expires_at.is_(None),
+                    ScheduledTask.lease_expires_at > now_pre,
+                ),
+            )
+            .values(
+                dispatch_in_flight=True,
+                last_dispatch_attempt_id=dispatch_attempt_id,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        predispatch_res = await session.execute(predispatch_stmt)
+        if predispatch_res.rowcount != 1:
+            await session.rollback()
+            self.active_fence_tokens.pop(task_id, None)
+            logger.warning(
+                "Predespacho abortado: worker %s no pudo asegurar el bloqueo condicional atómico para tarea %s (token %s).",
+                self.worker_id,
+                task_id,
+                my_fence_token,
+            )
+            return False, "Fallo al iniciar predespacho: la tarea ya no está vigente para este worker o existe un despacho en vuelo concurrente."
+
+        # Sincronizar atributos en memoria para la sesión activa
         persisted_task.dispatch_in_flight = True
         persisted_task.last_dispatch_attempt_id = dispatch_attempt_id
+        task.dispatch_in_flight = True
+        task.last_dispatch_attempt_id = dispatch_attempt_id
 
         in_progress_log = ExecutionLog(
             tenant_id=persisted_task.tenant_id,
@@ -347,48 +402,110 @@ class DurableExecutionWorker:
             conf_number = sub_result.confirmation_number
 
         # =========================================================================
-        # 8. VERIFICACIÓN DE FENCING (Asegurar que el lease no expiró ni fuimos superados)
+        # 8. TRANSICIÓN ATÓMICA DE FINALIZACIÓN
+        # Comprobar atómicamente:
+        # - id == persisted_task.id
+        # - status == "executing"
+        # - locked_by == self.worker_id
+        # - fence_token == my_fence_token
+        # - dispatch_in_flight == True
+        # - last_dispatch_attempt_id == dispatch_attempt_id
         # =========================================================================
-        fence_check = await session.execute(
-            select(ScheduledTask.fence_token, ScheduledTask.locked_by)
-            .where(ScheduledTask.id == persisted_task.id)
+        if exec_result == "success":
+            target_task_status = "completed"
+        elif exec_result == "uncertain":
+            target_task_status = "result_uncertain"
+        else:
+            target_task_status = "failed"
+
+        final_task_stmt = (
+            update(ScheduledTask)
+            .where(
+                ScheduledTask.id == persisted_task.id,
+                ScheduledTask.status == "executing",
+                ScheduledTask.locked_by == self.worker_id,
+                ScheduledTask.fence_token == my_fence_token,
+                ScheduledTask.dispatch_in_flight.is_(True),
+                ScheduledTask.last_dispatch_attempt_id == dispatch_attempt_id,
+            )
+            .values(
+                status=target_task_status,
+                locked_by=None,
+                lease_expires_at=None,
+                dispatch_in_flight=False,
+            )
+            .execution_options(synchronize_session=False)
         )
-        current_fence_row = fence_check.first()
-        if (
-            not current_fence_row
-            or current_fence_row[0] != my_fence_token
-            or current_fence_row[1] != self.worker_id
-        ):
-            # El worker perdió el lease y fue superado por un recovery o un worker nuevo
+        final_res = await session.execute(final_task_stmt)
+        if final_res.rowcount != 1:
+            await session.rollback()
+            self.active_fence_tokens.pop(task_id, None)
+            try:
+                await session.refresh(task)
+            except Exception:
+                pass
             logger.warning(
-                "Worker %s descartado por token de fencing obsoleto para tarea %s (DB token: %s, my token: %s)",
+                "Worker %s descartado por token de fencing u ownership obsoleto al finalizar tarea %s (token: %s)",
                 self.worker_id,
-                persisted_task.id,
-                current_fence_row[0] if current_fence_row else None,
+                task_id,
                 my_fence_token,
             )
-            return False, f"Worker {self.worker_id} descartado por token de fencing obsoleto (perdió lease)."
+            return False, (
+                f"Worker {self.worker_id} descartado al finalizar: "
+                f"token de fencing obsoleto (perdió lease o titularidad durante el despacho)."
+            )
 
-        # =========================================================================
-        # 9. FINALIZACIÓN Y SINCRONIZACIÓN (Tarea, Candidatura, CRM y Auditoría)
-        # =========================================================================
-        # Actualizar el registro in_progress persistido previamente
-        in_progress_log.result = exec_result
-        in_progress_log.completed_at = completed_dt
-        in_progress_log.duration_ms = duration
-        in_progress_log.evidence = evidence_data
-        in_progress_log.error_message = error_msg
-
-        persisted_task.dispatch_in_flight = False
+        # Sincronizar atributos en memoria para la sesión activa
+        persisted_task.status = target_task_status
         persisted_task.locked_by = None
         persisted_task.lease_expires_at = None
+        persisted_task.dispatch_in_flight = False
+        task.status = target_task_status
+        task.locked_by = None
+        task.lease_expires_at = None
+        task.dispatch_in_flight = False
 
-        crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == candidacy.id))
+        # =========================================================================
+        # 9. SINCRONIZACIÓN (ExecutionLog, Candidacy, CRM y Eventos)
+        # =========================================================================
+        log_res = await session.execute(
+            select(ExecutionLog)
+            .where(
+                ExecutionLog.task_id == persisted_task.id,
+                ExecutionLog.action == "submit_application",
+                ExecutionLog.started_at == start_dt,
+            )
+        )
+        exec_log = log_res.scalar_one_or_none()
+        if exec_log:
+            exec_log.result = exec_result
+            exec_log.completed_at = completed_dt
+            exec_log.duration_ms = duration
+            exec_log.evidence = evidence_data
+            exec_log.error_message = error_msg
+        else:
+            session.add(ExecutionLog(
+                tenant_id=persisted_task.tenant_id,
+                task_id=persisted_task.id,
+                candidacy_id=candidacy.id,
+                action="submit_application",
+                result=exec_result,
+                evidence=evidence_data,
+                error_message=error_msg,
+                started_at=start_dt,
+                completed_at=completed_dt,
+                duration_ms=duration,
+            ))
+
+        cand_res = await session.execute(select(Candidacy).where(Candidacy.id == persisted_task.candidacy_id))
+        cand_obj = cand_res.scalar_one_or_none()
+
+        crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == persisted_task.candidacy_id))
         crm = crm_res.scalar_one_or_none()
 
         if exec_result == "success":
-            persisted_task.status = "completed"
-            candidacy.status = "sent_confirmed"
+            if cand_obj:
+                cand_obj.status = "sent_confirmed"
             if crm:
                 old_st = crm.current_status
                 crm.current_status = "sent_confirmed"
@@ -406,12 +523,13 @@ class DurableExecutionWorker:
                     },
                 ))
             await session.commit()
+            self.active_fence_tokens.pop(persisted_task.id, None)
             return True, f"Postulación enviada exitosamente. Recibo: {conf_number}"
 
         elif exec_result == "uncertain":
             # P0/P1: Resultado incierto -> requiere intervención, PROHIBIDO reenvío ciego
-            persisted_task.status = "result_uncertain"
-            candidacy.status = "result_uncertain"
+            if cand_obj:
+                cand_obj.status = "result_uncertain"
             if crm:
                 old_st = crm.current_status
                 crm.current_status = "requires_intervention"
@@ -429,12 +547,13 @@ class DurableExecutionWorker:
                     },
                 ))
             await session.commit()
+            self.active_fence_tokens.pop(persisted_task.id, None)
             return False, f"Resultado incierto en portal ({dispatch_attempt_id}). Pasa a 'requires_intervention': {error_msg}"
 
         else:
             # Fallo definitivo
-            persisted_task.status = "failed"
-            candidacy.status = "failed"
+            if cand_obj:
+                cand_obj.status = "failed"
             if crm:
                 old_st = crm.current_status
                 crm.current_status = "failed"
@@ -448,6 +567,7 @@ class DurableExecutionWorker:
                     details={"error": error_msg},
                 ))
             await session.commit()
+            self.active_fence_tokens.pop(persisted_task.id, None)
             return False, f"Fallo en portal: {error_msg}"
 
     @classmethod
@@ -487,8 +607,8 @@ class DurableExecutionWorker:
         recovered = []
 
         for task in stale_tasks:
-            # Incrementar fencing token para invalidar al worker original
-            task.fence_token += 1
+            current_fence_token = task.fence_token
+            new_fence_token = current_fence_token + 1
 
             # Inspeccionar el historial de logs
             log_res = await session.execute(
@@ -499,32 +619,14 @@ class DurableExecutionWorker:
             logs = log_res.scalars().all()
             last_log = logs[0] if logs else None
 
-            # Cargar candidatura y CRM para sincronización
-            cand_res = await session.execute(
-                select(Candidacy).where(Candidacy.id == task.candidacy_id)
-            )
-            candidacy = cand_res.scalar_one_or_none()
-
-            crm_res = await session.execute(
-                select(CRMEntry).where(CRMEntry.candidacy_id == task.candidacy_id)
-            )
-            crm = crm_res.scalar_one_or_none()
-
+            # Determinar acción y estados de recuperación
             # Caso 1: Log previo confirma éxito
             if last_log and last_log.result == "success":
-                task.status = "completed"
-                task.locked_by = None
-                task.lease_expires_at = None
-                task.dispatch_in_flight = False
-                if candidacy:
-                    candidacy.status = "sent_confirmed"
-                if crm:
-                    crm.current_status = "sent_confirmed"
-                recovered.append({
-                    "task_id": task.id,
-                    "action": "reconciled_completed",
-                    "reason": "Efecto completado en portal antes de la caída; estado reconciliado sin reenvío.",
-                })
+                target_status = "completed"
+                cand_target_status = "sent_confirmed"
+                crm_target_status = "sent_confirmed"
+                rec_action = "reconciled_completed"
+                rec_reason = "Efecto completado en portal antes de la caída; estado reconciliado sin reenvío."
 
             # Caso 2: Intento de despacho en vuelo, log in_progress/uncertain, o incertidumbre
             elif (
@@ -532,60 +634,94 @@ class DurableExecutionWorker:
                 or (last_log and last_log.result in ("in_progress", "uncertain"))
                 or (last_log is None and task.attempts > 0)
             ):
-                # P0: La ausencia de log final o log in_progress no permite asumir ausencia de efecto
-                task.status = "result_uncertain"
-                task.locked_by = None
-                task.lease_expires_at = None
-                task.dispatch_in_flight = False
-                if candidacy:
-                    candidacy.status = "result_uncertain"
-                if crm:
-                    old_st = crm.current_status
-                    crm.current_status = "requires_intervention"
-                    crm.next_action = "Verificar estado en el portal manualmente. No reenviar a ciegas tras interrupción durante despacho."
-                    crm.notes = "Interrupción o expiración de lease durante despacho al portal. Requiere intervención manual."
-                    session.add(CRMEvent(
-                        tenant_id=task.tenant_id,
-                        crm_entry_id=crm.id,
-                        event_type="recovery_flagged_uncertain",
-                        old_status=old_st,
-                        new_status="requires_intervention",
-                        details={"reason": "Lease expired or crash during dispatch. Blind resend forbidden."},
-                    ))
-                recovered.append({
-                    "task_id": task.id,
-                    "action": "flag_requires_intervention",
-                    "reason": "Despacho en vuelo interrumpido o sin confirmación concluyente; retenido para intervención manual.",
-                })
+                target_status = "result_uncertain"
+                cand_target_status = "result_uncertain"
+                crm_target_status = "requires_intervention"
+                rec_action = "flag_requires_intervention"
+                rec_reason = "Despacho en vuelo interrumpido o sin confirmación concluyente; retenido para intervención manual."
 
             # Caso 3: Fallo explícito registrado
             elif last_log and last_log.result == "failure":
-                task.status = "failed"
-                task.locked_by = None
-                task.lease_expires_at = None
-                task.dispatch_in_flight = False
-                if candidacy:
-                    candidacy.status = "failed"
-                if crm:
-                    crm.current_status = "failed"
-                recovered.append({
-                    "task_id": task.id,
-                    "action": "marked_failed",
-                    "reason": "Fallo registrado previo a caída.",
-                })
+                target_status = "failed"
+                cand_target_status = "failed"
+                crm_target_status = "failed"
+                rec_action = "marked_failed"
+                rec_reason = "Fallo registrado previo a caída."
 
             # Caso 4: Jamás hubo intento de despacho ni logs y attempts == 0
             else:
-                task.status = "pending"
-                task.locked_by = None
-                task.locked_at = None
-                task.lease_expires_at = None
-                task.dispatch_in_flight = False
-                recovered.append({
-                    "task_id": task.id,
-                    "action": "reset_to_pending",
-                    "reason": "Tarea bloqueada pero sin ningún intento de despacho iniciado; reintento seguro.",
-                })
+                target_status = "pending"
+                cand_target_status = None
+                crm_target_status = None
+                rec_action = "reset_to_pending"
+                rec_reason = "Tarea bloqueada pero sin ningún intento de despacho iniciado; reintento seguro."
+
+            # Transición ATÓMICA sobre ScheduledTask
+            rec_stmt = (
+                update(ScheduledTask)
+                .where(
+                    ScheduledTask.id == task.id,
+                    ScheduledTask.fence_token == current_fence_token,
+                    ScheduledTask.status == "executing",
+                )
+                .values(
+                    status=target_status,
+                    fence_token=new_fence_token,
+                    locked_by=None,
+                    locked_at=None if target_status == "pending" else task.locked_at,
+                    lease_expires_at=None,
+                    dispatch_in_flight=False,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            rec_res = await session.execute(rec_stmt)
+            if rec_res.rowcount != 1:
+                # La tarea ya fue modificada por otro proceso o recuperación concurrente
+                logger.info("Recuperación saltó tarea %s por colisión concurrente de token.", task.id)
+                continue
+
+            # Sincronizar atributos en memoria para la sesión activa
+            task.status = target_status
+            task.fence_token = new_fence_token
+            task.locked_by = None
+            task.locked_at = None if target_status == "pending" else task.locked_at
+            task.lease_expires_at = None
+            task.dispatch_in_flight = False
+
+            # Sincronizar Candidacy y CRM si aplica
+            if cand_target_status:
+                cand_res = await session.execute(
+                    select(Candidacy).where(Candidacy.id == task.candidacy_id)
+                )
+                candidacy = cand_res.scalar_one_or_none()
+                if candidacy:
+                    candidacy.status = cand_target_status
+
+            if crm_target_status:
+                crm_res = await session.execute(
+                    select(CRMEntry).where(CRMEntry.candidacy_id == task.candidacy_id)
+                )
+                crm = crm_res.scalar_one_or_none()
+                if crm:
+                    old_st = crm.current_status
+                    crm.current_status = crm_target_status
+                    if crm_target_status == "requires_intervention":
+                        crm.next_action = "Verificar estado en el portal manualmente. No reenviar a ciegas tras interrupción durante despacho."
+                        crm.notes = "Interrupción o expiración de lease durante despacho al portal. Requiere intervención manual."
+                        session.add(CRMEvent(
+                            tenant_id=task.tenant_id,
+                            crm_entry_id=crm.id,
+                            event_type="recovery_flagged_uncertain",
+                            old_status=old_st,
+                            new_status="requires_intervention",
+                            details={"reason": "Lease expired or crash during dispatch. Blind resend forbidden."},
+                        ))
+
+            recovered.append({
+                "task_id": task.id,
+                "action": rec_action,
+                "reason": rec_reason,
+            })
 
         await session.commit()
         return recovered

@@ -7,6 +7,7 @@ Cubre los 4 requerimientos obligatorios del dictamen de Work sobre 54b844f:
 4. P1: Control estricto de simulación (bloqueo fail-closed de adaptadores no simulados).
 """
 
+import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 import os
@@ -82,6 +83,7 @@ async def regression_db(tmp_path):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
     async with engine.begin() as conn:
@@ -873,3 +875,161 @@ class TestSimulationModeFailClosedProtection:
         )
         assert sim_blocked is False
         assert "efectos externos reales no autorizados" in msg_blocked
+
+
+class TestAtomicPredispatchAndFencingTransitions:
+    """
+    Pruebas requeridas por Work para verificar la transición atómica de predespacho
+    con comprobación de estado, propietario, token propio y lease vigente,
+    demostrando como máximo una llamada al adaptador y ningún despacho de titular obsoleto.
+    """
+
+    @pytest.mark.asyncio
+    async def test_two_concurrent_sessions_on_same_claim_executes_at_most_once(self, regression_db):
+        """
+        Dos sesiones concurrentes invocando execute_task a la vez sobre el mismo claim
+        con un adaptador con barrera/contador:
+        - Solo un efecto como máximo (adapter.call_count == 1).
+        - Una llamada triunfa y la otra falla atómicamente en predespacho sin tocar el adaptador.
+        """
+        session_maker_a, session_maker_b = regression_db
+        clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
+
+        async with session_maker_a() as session_setup:
+            tenant, candidacy, approval, task = await _create_test_candidacy_and_task(session_setup, clock)
+            task_id = task.id
+
+        clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
+
+        class BarrierCountingAdapter(MockPortalAdapter):
+            def __init__(self):
+                super().__init__(simulation_mode=True)
+                self.call_count = 0
+                self.entered_barrier = asyncio.Event()
+
+            async def submit_application(self, *args, **kwargs):
+                self.call_count += 1
+                self.entered_barrier.set()
+                # Pausa para permitir que la llamada concurrente intente el predespacho simultáneamente
+                await asyncio.sleep(0.05)
+                return await super().submit_application(*args, **kwargs)
+
+        adapter = BarrierCountingAdapter()
+        worker = DurableExecutionWorker(worker_id="worker-concurrent-claim", clock=clock, portal_adapter=adapter)
+
+        # Worker reclama la tarea en Session A
+        async with session_maker_a() as session_claim:
+            claimed = await worker.claim_task(session_claim, task_id, lease_seconds=300)
+            assert claimed is not None
+            claim_token = claimed.fence_token
+
+        # Invocación simultánea de execute_task desde dos sesiones independientes
+        async def run_session_a():
+            async with session_maker_a() as session_a:
+                task_a = await session_a.get(ScheduledTask, task_id)
+                return await worker.execute_task(session_a, task_a, expected_fence_token=claim_token)
+
+        async def run_session_b():
+            async with session_maker_b() as session_b:
+                task_b = await session_b.get(ScheduledTask, task_id)
+                return await worker.execute_task(session_b, task_b, expected_fence_token=claim_token)
+
+        res_a, res_b = await asyncio.gather(run_session_a(), run_session_b())
+
+        # Exactamente UNA de las dos ejecuciones debe haber tenido éxito
+        successes = [r for r in (res_a, res_b) if r[0] is True]
+        failures = [r for r in (res_a, res_b) if r[0] is False]
+
+        assert len(successes) == 1, f"Se esperaba exactamente un éxito, pero se obtuvo: {res_a}, {res_b}"
+        assert len(failures) == 1, f"Se esperaba exactamente un fallo condicional, pero se obtuvo: {res_a}, {res_b}"
+
+        # El fallo debe reportar colisión en predespacho o estado no coincidente
+        fail_msg = failures[0][1].lower()
+        assert "predespacho" in fail_msg or "despacho en vuelo concurrente" in fail_msg or "no está vigente" in fail_msg or "estado inválido" in fail_msg
+
+        # DEMOSTRACIÓN CRÍTICA: Como máximo UNA llamada al adaptador
+        assert adapter.call_count == 1, f"El adaptador fue llamado {adapter.call_count} veces; DEBE ser como máximo 1."
+
+    @pytest.mark.asyncio
+    async def test_intercalated_recovery_before_predispatch_blocks_adapter_completely(self, regression_db):
+        """
+        Recuperación intercalada ANTES del predespacho:
+        - Worker A reclama la tarea.
+        - Antes del predespacho, el lease expira y la recuperación se ejecuta en Sesión B,
+          incrementando el fence_token y reseteando la tarea.
+        - Worker A intenta ejecutar: la transición atómica condicional de predespacho
+          debe fallar (cero filas afectadas) y el adaptador jamás debe ser contactado.
+        """
+        session_maker_a, session_maker_b = regression_db
+        clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
+
+        async with session_maker_a() as session_setup:
+            tenant, candidacy, approval, task = await _create_test_candidacy_and_task(session_setup, clock)
+            task_id = task.id
+
+        clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
+        adapter = CountingMockAdapter()
+        worker = DurableExecutionWorker(worker_id="worker-obsolete-claim", clock=clock, portal_adapter=adapter)
+
+        # Worker reclama la tarea
+        async with session_maker_a() as session_claim:
+            claimed = await worker.claim_task(session_claim, task_id, lease_seconds=60)
+            assert claimed is not None
+            obsolete_token = claimed.fence_token
+
+        # El tiempo avanza más allá del lease antes de que el worker inicie predespacho
+        clock.advance_seconds(120)
+
+        # La recuperación corre en Sesión B, intercalándose antes del predespacho
+        async with session_maker_b() as session_b:
+            recovered = await DurableExecutionWorker.recover_stale_tasks(
+                session=session_b,
+                stale_threshold_seconds=60,
+                clock=clock,
+            )
+            assert len(recovered) == 1
+            # Conforme a la regla de incertidumbre, como la tarea tuvo attempts > 0 sin log confirmado,
+            # la recuperación la retiene como flag_requires_intervention y result_uncertain
+            assert recovered[0]["action"] == "flag_requires_intervention"
+
+        # Worker intenta ejecutar con su token obsoleto
+        async with session_maker_a() as session_a:
+            task_a = await session_a.get(ScheduledTask, task_id)
+            success, msg = await worker.execute_task(session_a, task_a, expected_fence_token=obsolete_token)
+
+            # Debe ser rechazado
+            assert success is False
+            # EFECTO CERO: El adaptador NO debe ser tocado en lo absoluto
+            assert adapter.call_count == 0, "El adaptador fue contactado por un titular obsoleto!"
+
+    @pytest.mark.asyncio
+    async def test_worker_without_claimed_token_fails_closed_no_db_fallback(self, regression_db):
+        """
+        Si un worker invoca execute_task sin poseer un claim activo (token propio),
+        debe fallar cerrado de inmediato y NO adoptar el token de base de datos como sustituto.
+        """
+        session_maker_a, _ = regression_db
+        clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
+
+        async with session_maker_a() as session:
+            tenant, candidacy, approval, task = await _create_test_candidacy_and_task(session, clock)
+            task_id = task.id
+
+            clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
+            adapter = CountingMockAdapter()
+            # Worker que reclama formalmente
+            worker_owner = DurableExecutionWorker(worker_id="worker-legit", clock=clock, portal_adapter=adapter)
+            claimed = await worker_owner.claim_task(session, task_id)
+            assert claimed is not None
+
+            # Worker impostor o no inicializado con el mismo worker_id pero sin token en active_fence_tokens
+            worker_uninitialized = DurableExecutionWorker(worker_id="worker-legit", clock=clock, portal_adapter=adapter)
+            assert task_id not in worker_uninitialized.active_fence_tokens
+
+            # Intento de execute_task sin token propio:
+            success, msg = await worker_uninitialized.execute_task(session, claimed)
+
+            assert success is False
+            assert "no posee un claim activo" in msg.lower() or "prohibido adoptar el token" in msg.lower()
+            # EFECTO CERO
+            assert adapter.call_count == 0

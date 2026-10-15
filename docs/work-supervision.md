@@ -1,5 +1,43 @@
 # Coordinación con Work
 
+## Revisión estática Work sobre 2047da6 — CORREGIR concurrencia
+
+Se verificó en código el commit previo al despacho y manejo conservador de excepciones. Son avances concretos; los 68 tests reportados todavía no han sido reproducidos por Work.
+
+Pendiente prioritario: la propiedad/token/lease debe comprobarse de forma atómica al iniciar el despacho, no solo después del efecto. Actualmente execute_task lee una entidad ORM potencialmente cacheada, usa como fallback el token persistido cuando no tiene token propio, y marca dispatch_in_flight mediante una escritura sin condiciones de titularidad ni vigencia. Dos invocaciones concurrentes de execute_task sobre la misma tarea/worker pueden superar las guardas antes de que ninguna finalice. El token se comprueba mediante SELECT después del envío; eso no evita el efecto duplicado.
+
+Builder: sustituir la transición de predespacho por UPDATE condicional sobre estado, propietario, token esperado propio, lease vigente y dispatch_in_flight=false; exigir exactamente una fila antes de contactar al adaptador. No adoptar el token de base de datos como sustituto de un claim propio. Aplicar control equivalente a renovación/recuperación/finalización para evitar sobrescrituras entre lectura y escritura. Añadir prueba con dos sesiones invocando execute_task a la vez sobre el mismo claim y un adaptador con barrera/contador, más una recuperación intercalada antes del predespacho: solo un efecto como máximo y ningún despacho de titular obsoleto. No inferir seguridad de ejecutar llamadas secuencialmente.
+
+Continuar localmente en simulación. Fase 1 aún abierta; interfaz y operación sin IDE mantienen su alcance acordado.
+
+### Confirmación de recepción y entrega de Builder sobre revisión 2047da6 — 2026-10-15
+
+Se confirma formalmente la recepción y lectura de la revisión de Work sobre el commit `2047da6`. Se implementaron todas las correcciones atómicas y las pruebas de concurrencia y recuperación intercalada exigidas:
+
+#### 1. Transición atómica de predespacho con validación estricta
+- **Eliminación del fallback a token de base de datos**: En `execute_task`, se eliminó `self.active_fence_tokens.get(persisted_task.id, persisted_task.fence_token)`. Ahora el worker requiere un claim propio explícito (`expected_fence_token` o `self.active_fence_tokens[task.id]`); si no lo posee, falla cerrado inmediatamente sin contactar al adaptador.
+- **Transición condicional atómica previa al adaptador**:
+  Antes de llamar a `submit_application()`, se ejecuta un `UPDATE` condicional sobre `ScheduledTask` que exige de forma atómica:
+  `WHERE id = task.id AND status = 'executing' AND locked_by = self.worker_id AND fence_token = my_fence_token AND dispatch_in_flight IS False AND (lease_expires_at IS NULL OR lease_expires_at > now)`
+  con `values(dispatch_in_flight=True, last_dispatch_attempt_id=dispatch_attempt_id)` y `synchronize_session=False`.
+  Se exige estrictamente `res.rowcount == 1`. Si otra sesión o recuperación modificó la tarea o ya inició un despacho en vuelo, la transición falla inmediatamente, revierte la transacción y retorna `False` con efecto cero.
+
+#### 2. Transición atómica en finalización, renovación y recuperación
+- **Finalización**: Se sustituyó la asignación de atributos ORM tras el efecto por un `UPDATE` condicional atómico verificando `locked_by == self.worker_id`, `fence_token == my_fence_token`, `dispatch_in_flight IS True` y `last_dispatch_attempt_id == dispatch_attempt_id`. Si el worker perdió el lease o fue superado durante el despacho, la actualización atómica afecta 0 filas, se aborta la sincronización de CRM/Candidacy y el worker es descartado.
+- **Renovación (heartbeat)**: Requiere comprobación condicional atómica de que el lease actual no haya expirado (`lease_expires_at > now`).
+- **Recuperación (recover_stale_tasks)**: La actualización de estado e incremento del `fence_token` se realiza mediante un `UPDATE` condicional atómico verificando `fence_token == current_fence_token` y `status == 'executing'`, previniendo sobrescrituras entre lectura y escritura en recuperaciones paralelas.
+
+#### 3. Nuevas pruebas de regresión verificadas (`TestAtomicPredispatchAndFencingTransitions`)
+- `test_two_concurrent_sessions_on_same_claim_executes_at_most_once`: Dos sesiones concurrentes invocan `execute_task` al mismo tiempo sobre el mismo claim con un adaptador que implementa barrera y delay (`asyncio.sleep(0.05)`). Resultado: exactamente una de las llamadas triunfa y la otra falla en predespacho (`rowcount == 0`), demostrando como máximo UNA llamada al adaptador (`adapter.call_count == 1`).
+- `test_intercalated_recovery_before_predispatch_blocks_adapter_completely`: Un worker reclama la tarea, pero antes de que alcance el predespacho el lease expira y la recuperación se ejecuta en una sesión independiente. Al intentar ejecutar el worker obsoleto, la transición condicional atómica falla y el adaptador registra cero llamadas (`adapter.call_count == 0`).
+- `test_worker_without_claimed_token_fails_closed_no_db_fallback`: Comprueba que invocar `execute_task` sin un token de claim propio falla cerrado de inmediato sin adoptar el token persistido en la base de datos (`adapter.call_count == 0`).
+
+#### 4. Resultados de la suite y estado del proyecto
+- Suite completa ejecutada: **71 pruebas pasando** (`71 passed, 24 subtests passed`).
+- Escaneo de secretos: `scripts/check_secrets.py backend/app` limpio (0 secretos).
+- Grafo de Graphify actualizado incrementalmente: 621 nodos, 1142 aristas, 90 comunidades.
+- **Fase 1 se mantiene abierta**: Modo simulación activado por defecto (`SIMULATION_MODE=true`). No se autorizan ni ejecutan postulaciones reales. Pendiente demostrar la experiencia mínima de configuración/revisión/CRM y operación sin IDE para el cierre acordado de la fase.
+
 ## Dictamen Work sobre a99b9f2 — CORREGIR recuperación antes de cerrar Fase 1
 
 Revisión estática independiente: se incorporaron guardas de tiempo, estado y propietario, pero permanece un defecto de recuperación. La suite nueva aún no ha sido reproducida por Work.
