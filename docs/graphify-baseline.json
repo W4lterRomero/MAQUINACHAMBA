@@ -1,0 +1,65 @@
+{
+  "corpus_tokens": 2496,
+  "corpus_words": 1872,
+  "nodes": 77,
+  "edges": 68,
+  "avg_query_tokens": 687,
+  "reduction_ratio": 3.6,
+  "per_question": [
+    {
+      "question": "hash_content",
+      "query_tokens": 674,
+      "reduction": 3.7
+    },
+    {
+      "question": "validate_url",
+      "query_tokens": 674,
+      "reduction": 3.7
+    },
+    {
+      "question": "AuthorizationPolicy",
+      "query_tokens": 840,
+      "reduction": 3.0
+    },
+    {
+      "question": "ScheduledTask",
+      "query_tokens": 560,
+      "reduction": 4.5
+    }
+  ],
+  "elapsed_seconds": 0.0051,
+  "method": "Graphify heuristic: corpus words*100//75, retrieved context chars//4. Not billed tokens; excludes source verification, indexing overhead and answer quality.",
+  "scope": "Tracked backend Python files, current working contents; partial AST graph only",
+  "sources": {
+    "backend/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/core/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/core/config.py": "a3681f13e1c67ee7777bec3ca35367cad6765e51766aa433ed7ec73f07ebcf0d",
+    "backend/app/core/database.py": "2713a896908e6c6fb541f17292d36925ff652c54a6d26166b491e10185b78d87",
+    "backend/app/core/security.py": "7805f17f7196f32da7e8fed51896c2e1696e4c7f045372c85505064fd5774ce8",
+    "backend/app/main.py": "f97bcac7123811b2a5755a405ee068e881750c73c3c0218dc644d9c295917f72",
+    "backend/app/modules/approvals/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/approvals/models.py": "aaa5779de68da9aa64a3709a9bff34c3f7ba90c3c953c23dea83c79b0aa96c23",
+    "backend/app/modules/audit/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/communication/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/crm/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/cv/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/email_mod/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/evaluation/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/execution/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/portals/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/profile/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/scheduling/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/secrets/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/users/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/modules/vacancies/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "graph_sha256": "2ba5a6c719a8229bcfa8853f0942bd57362623ae456f72cc4290c17658c46ab7",
+  "questions_requested": [
+    "hash_content",
+    "validate_url",
+    "AuthorizationPolicy",
+    "ScheduledTask"
+  ]
+}

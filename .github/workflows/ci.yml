@@ -34,9 +34,5 @@ jobs:
         run: |
           python -m pytest tests/ -v --tb=short
 
-      - name: Check for secrets in code
-        run: |
-          # Basic check for common secret patterns
-          ! grep -rn "sk-[a-zA-Z0-9]\{20,\}" --include="*.py" --include="*.ts" --include="*.tsx" --include="*.yml" .
-          ! grep -rn "password.*=.*['\"][^'\"]*['\"]" --include="*.py" backend/app/ || true
-          echo "No hardcoded secrets found."
+      - name: Check for secrets in application source
+        run: python scripts/check_secrets.py backend/app frontend/src

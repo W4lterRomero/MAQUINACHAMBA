@@ -4,6 +4,7 @@ Módulo de seguridad: autenticación, autorización y política central.
 
 import hashlib
 import hmac
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from ipaddress import ip_address, ip_network
@@ -104,36 +105,52 @@ BLOCKED_HOSTS = {
 
 def validate_url(url: str) -> tuple[bool, str]:
     """
-    Valida que una URL sea segura para acceder.
-    Returns: (safe, reason)
+    Validación preliminar sin red; no autoriza por sí sola una conexión.
+    El transporte debe validar DNS, fijar la IP pública validada conservando
+    Host/TLS y repetir la política para cada redirección.
     """
     try:
+        if any(ord(char) <= 32 or ord(char) == 127 for char in url) or "\\" in url:
+            return False, "URL con caracteres ambiguos."
         parsed = urlparse(url)
+        hostname = parsed.hostname
+        port = parsed.port  # Force validation even when no connection is made.
+        if port == 0 or parsed.username is not None or parsed.password is not None:
+            return False, "Puerto o credenciales en URL no permitidos."
     except Exception:
         return False, "URL inválida."
 
     if parsed.scheme not in ("http", "https"):
         return False, f"Esquema no permitido: {parsed.scheme}"
 
-    hostname = parsed.hostname
     if not hostname:
         return False, "URL sin hostname."
 
     # Check blocked hosts
-    if hostname.lower() in BLOCKED_HOSTS:
+    hostname = hostname.lower().rstrip(".")
+    if (hostname in BLOCKED_HOSTS or hostname == "localhost"
+            or hostname.endswith((".localhost", ".local", ".internal"))
+            or "%" in hostname):
         return False, f"Host bloqueado: {hostname}"
 
     # Check if hostname is an IP address in blocked range
     try:
         ip = ip_address(hostname)
+        effective_ip = getattr(ip, "ipv4_mapped", None) or ip
+        if not effective_ip.is_global or effective_ip.is_multicast:
+            return False, "IP no pública."
         for network in BLOCKED_IP_RANGES:
             if ip in network:
                 return False, f"IP en rango bloqueado: {hostname}"
     except ValueError:
-        # Not an IP address, that's fine
-        pass
+        # Reject ambiguous numeric/legacy IP forms and single-label hosts.
+        if "." not in hostname or all(
+            re.fullmatch(r"(?:[0-9]+|0x[0-9a-f]+)", part)
+            for part in hostname.split(".")
+        ):
+            return False, "Hostname local o numérico ambiguo."
 
-    return True, "URL válida."
+    return True, "Formato permitido; requiere validación DNS y de transporte."
 
 
 # =============================================================================
@@ -145,10 +162,12 @@ def hash_content(*parts: str) -> str:
     Genera un hash SHA-256 determinista del contenido.
     Usado para verificar integridad de aprobaciones.
     """
-    hasher = hashlib.sha256()
-    for part in parts:
-        hasher.update(part.encode("utf-8"))
-    return hasher.hexdigest()
+    # Versioned framing preserves field boundaries, order and empty fields.
+    # Legacy hashes deliberately fail verification and require fresh approval.
+    payload = json.dumps(
+        ["approval-content-v2", list(parts)], ensure_ascii=False, separators=(",", ":")
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def verify_content_hash(expected: str, *parts: str) -> bool:

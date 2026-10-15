@@ -53,6 +53,27 @@ graphify --update .
 
 ## Métricas
 
+### Medición exploratoria local de Work — 2026-10-15
+
+Evidencia: `docs/graphify-baseline.json` (incluye hashes del código e índice).
+Se usó `graphify.benchmark.run_benchmark` sobre `backend/graphify-out/graph.json`,
+con `corpus_words=1872`, contado desde los archivos Python listados por
+`git ls-files backend` en su estado de trabajo. Consultas: `hash_content`,
+`validate_url`, `AuthorizationPolicy`, `ScheduledTask`.
+
+- Índice parcial AST: 77 nodos, 68 aristas.
+- Corpus completo estimado por la herramienta: 2496 tokens.
+- Contexto recuperado estimado promedio: 687 tokens (4 consultas con resultados).
+- Cociente heurístico: 3.6x frente a cargar todo ese corpus.
+- Tiempo local de la función de benchmark: 0.0051 segundos; no mide indexación ni tiempo de una tarea de desarrollo.
+
+**No es ahorro real demostrado**: Graphify aproxima el corpus por palabras y
+el contexto por caracteres, con métodos distintos. No cuenta lectura posterior
+del código, razonamiento, respuestas, mantenimiento del índice ni calidad.
+Tampoco compara contra búsqueda dirigida con `rg`. No se realizaron llamadas
+a proveedores de IA ni se midió facturación. Mantener pendiente la comparación
+de tareas equivalentes y el ahorro neto antes de declarar cumplido ese requisito.
+
 ### Línea base (Fase 0)
 
 | Métrica | Sin Graphify | Con Graphify | Notas |
