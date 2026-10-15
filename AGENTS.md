@@ -17,7 +17,7 @@ Este proyecto usa Graphify para navegación eficiente del codebase.
 ### Actualización del índice:
 
 - Actualiza el índice cuando cambie la estructura de módulos, se añadan archivos significativos o cambien dependencias entre componentes.
-- Usa `graphify --update` para actualizaciones incrementales.
+- Usa `graphify update .` para actualizaciones incrementales (no requiere LLM).
 - Confirma hallazgos contra el código fuente: el grafo no sustituye la lectura del código ni las pruebas.
 
 ### Exclusiones obligatorias:

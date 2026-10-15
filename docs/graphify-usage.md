@@ -48,7 +48,7 @@ graphify query "¿cómo fluye una candidatura desde descubrimiento hasta ejecuci
 graphify path "AuthorizationPolicy" "ScheduledTask"
 
 # Actualizar tras cambios
-graphify --update .
+graphify update .
 ```
 
 ## Métricas
