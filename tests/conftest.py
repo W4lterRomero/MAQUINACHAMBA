@@ -15,6 +15,14 @@ os.environ["APP_ENV"] = "development"
 os.environ["APP_SECRET_KEY"] = "test-secret-key-not-for-production"
 
 from backend.app.core.database import Base, engine, init_db, close_db
+# Importar todos los modelos para registro en Base.metadata
+from backend.app.modules.users.models import Tenant
+from backend.app.modules.profile.models import UserProfile, Skill, Experience
+from backend.app.modules.cv.models import MasterCV
+from backend.app.modules.vacancies.models import Vacancy
+from backend.app.modules.evaluation.models import Evaluation
+from backend.app.modules.approvals.models import Candidacy, Approval, ScheduledTask, ExecutionLog
+from backend.app.modules.crm.models import CRMEntry, CRMEvent
 from backend.app.main import app
 
 

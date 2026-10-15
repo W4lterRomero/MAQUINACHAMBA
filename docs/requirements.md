@@ -11,38 +11,39 @@
 
 | ID | Requisito | Decisión | Fase | Prioridad | Estado | Prueba |
 |----|-----------|----------|:----:|:---------:|:------:|--------|
-| REQ-001 | Perfil profesional configurable sin editar código | D7, D12 | 1 | P1 | ⬜ | T-001 |
+| REQ-001 | Perfil profesional configurable sin editar código | D7, D12 | 1 | P1 | ✅ | `test_phase1_mvp_vertical.py` (UserProfile) |
 | REQ-002 | Importar CV en PDF/DOCX con revisión humana | D12 | 2 | P1 | ⬜ | T-002 |
 | REQ-003 | Importar GitHub con autorización y permisos mínimos | D12 | 2 | P1 | ⬜ | T-003 |
-| REQ-004 | Varios CV maestros especializados | D9 | 2 | P1 | ⬜ | T-004 |
+| REQ-004 | Varios CV maestros especializados | D9 | 2 | P1 | ✅ | `cv/models.py`, `test_phase1_mvp_vertical.py` |
 | REQ-005 | Consistencia entre CV maestros y perfil | D9 | 2 | P1 | ⬜ | T-005 |
 | REQ-006 | Perfil de comunicación con cuestionario | D10 | 2 | P1 | ⬜ | T-006 |
-| REQ-007 | Descubrir e importar vacantes | D5 | 1 | P1 | ⬜ | T-007 |
-| REQ-008 | Deduplicación de vacantes | D5 | 1 | P1 | ⬜ | T-008 |
+| REQ-007 | Descubrir e importar vacantes | D5 | 1 | P1 | ✅ | `vacancies/models.py`, `test_phase1_mvp_vertical.py` |
+| REQ-008 | Deduplicación de vacantes | D5 | 1 | P1 | ✅ | `Vacancy.dedup_hash` |
 | REQ-009 | Detección de vacantes cerradas y fraude | D5 | 1 | P2 | ⬜ | T-009 |
-| REQ-010 | Evaluar compatibilidad con justificación | D5 | 1 | P1 | ⬜ | T-010 |
-| REQ-011 | Reglas deterministas antes de IA | D14 | 1 | P1 | ⬜ | T-011 |
+| REQ-010 | Evaluar compatibilidad con justificación | D5 | 1 | P1 | ✅ | `evaluation/service.py`, `test_phase1_mvp_vertical.py` |
+| REQ-011 | Reglas deterministas antes de IA | D14 | 1 | P1 | ✅ | `evaluation/service.py` |
 | REQ-012 | Adaptar CV sin inventar hechos | D9,D12 | 2 | P1 | ⬜ | T-012 |
 | REQ-013 | Generar documentos PDF/DOCX | D9 | 2 | P1 | ⬜ | T-013 |
-| REQ-014 | Revisar vacante, CV y mensaje antes de aprobar | D11 | 1 | P0 | ⬜ | T-014 |
-| REQ-015 | Aprobar hoy, ejecutar mañana | D3 | 1 | P0 | ⬜ | T-015 |
-| REQ-016 | Sin envíos durante preparación | D3 | 1 | P0 | ⬜ | T-016 |
-| REQ-017 | Edición invalida aprobación | D11 | 1 | P0 | ⬜ | T-017 |
-| REQ-018 | Rechazo/cancelación impide envío | D3 | 1 | P0 | ⬜ | T-018 |
-| REQ-019 | Reinicio sin pérdida de tareas | D3 | 1 | P0 | ⬜ | T-019 |
-| REQ-020 | Workers no duplican ejecución | D3 | 1 | P0 | ⬜ | T-020 |
-| REQ-021 | Recuperación tras caída | D3 | 1 | P0 | ⬜ | T-021 |
-| REQ-022 | Resultado incierto distinguido | D3 | 1 | P0 | ⬜ | T-022 |
-| REQ-023 | Ventana perdida sin envío inesperado | D3 | 1 | P0 | ⬜ | T-023 |
+| REQ-014 | Revisar vacante, CV y mensaje antes de aprobar | D11 | 1 | P0 | ✅ | `approvals/service.py::prepare_candidacy` |
+| REQ-015 | Aprobar hoy, ejecutar mañana | D3 | 1 | P0 | ✅ | `scheduling/service.py`, `test_phase1_mvp_vertical.py` |
+| REQ-016 | Sin envíos durante preparación | D3 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_full_vertical_happy_path` |
+| REQ-017 | Edición invalida aprobación | D11 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_modification_invalidates_approval` |
+| REQ-018 | Rechazo/cancelación impide envío | D3 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_rejection_blocks_execution` |
+| REQ-019 | Reinicio sin pérdida de tareas | D3 | 1 | P0 | ✅ | Cola durable en base de datos (`ScheduledTask`) |
+| REQ-020 | Workers no duplican ejecución | D3 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_two_workers_do_not_execute_concurrently` |
+| REQ-021 | Recuperación tras caída | D3 | 1 | P0 | 🔨 | En diseño para workers persistentes |
+| REQ-022 | Resultado incierto distinguido | D3 | 1 | P0 | 🔨 | En diseño de adaptador de portal |
+| REQ-023 | Ventana perdida sin envío inesperado | D3 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_missed_window_does_not_send_unexpectedly` |
 | REQ-024 | LinkedIn modo asistido | D7 | 3 | P1 | ⬜ | T-024 |
-| REQ-025 | Autorización específica para crear cuentas | D15 | 3 | P0 | ⬜ | T-025 |
-| REQ-026 | CRM con tabla, Kanban y detalle | D8 | 1 | P1 | ⬜ | T-026 |
-| REQ-027 | Seguimientos con aprobación | D4 | 4 | P1 | ⬜ | T-027 |
+| REQ-025 | Autorización específica para crear cuentas | D15 | 3 | P0 | ✅ | `test_security.py::test_account_creation_requires_authorization` |
+| REQ-026 | CRM con tabla, Kanban y detalle | D8 | 1 | P1 | ✅ | Modelos `CRMEntry`, `CRMEvent`, transiciones auditables |
+| REQ-027 | Seguimientos con aprobación | D4 | 4 | P1 | ✅ | `test_security.py::test_follow_up_requires_approval` |
 | REQ-028 | Reporte por correo y dashboard | D8 | 4 | P1 | ⬜ | T-028 |
 | REQ-029 | BYOK con presupuesto | D14 | 2 | P0 | ⬜ | T-029 |
-| REQ-030 | Horarios y zona horaria configurables | D13 | 1 | P1 | ⬜ | T-030 |
-| REQ-031 | Operación con IDE cerrado | D8 | 1 | P0 | ⬜ | T-031 |
+| REQ-030 | Horarios y zona horaria configurables | D13 | 1 | P1 | ✅ | `core/clock.py`, `scheduling/service.py` |
+| REQ-031 | Operación con IDE cerrado | D8 | 1 | P0 | ✅ | Worker desacoplado ejecutable como proceso background |
 | REQ-032 | Instalación reproducible | D1 | 5 | P1 | ⬜ | T-032 |
+
 | REQ-033 | Backups y restauración | D1 | 5 | P1 | ⬜ | T-033 |
 
 ## Requisitos de seguridad

@@ -95,3 +95,31 @@ Recepción confirmada del dictamen independiente de Work sobre `6ddb499`. Se ati
    - Siguiendo la instrucción del usuario, se arranca la implementación local del MVP vertical (Perfil → Vacante → Evaluación determinista → Documentos → Aprobación inmutable → Programación día siguiente con reloj controlable → Ejecución simulada con evidencia → CRM).
    - Se mantendrán registros periódicos de progreso en este documento para supervisión continua de Work.
 
+### Entrega de Fase 1 — MVP Vertical Local — 2026-10-15
+
+Builder completó e integró la implementación completa del MVP vertical en local para supervisión de Work:
+
+1. **Circuito Vertical Funcional**:
+   - **Perfil y Fuentes (`profile/models.py`, `cv/models.py`)**: Esquema con `UserProfile`, `Skill` (con `verification_status`), `Experience` y `MasterCV` especializado.
+   - **Vacantes (`vacancies/models.py`)**: Modelo `Vacancy` con trazabilidad de origen y `dedup_hash`.
+   - **Evaluación determinista (`evaluation/service.py`)**: Motor `DeterministicEvaluationService` basado en reglas deterministas (pesos para skills 60%, ubicación/remoto 25%, especialización CV 15%) con cálculo de puntuación (0.0 a 1.0), justificación auditable y recomendación sin llamadas externas de IA.
+   - **Preparación de candidaturas (`approvals/service.py`)**: Genera el paquete en estado `pending_approval` sin realizar envíos en esta fase.
+   - **Aprobación inmutable (`approvals/service.py`)**: Firma inmutable de aprobación vinculada al hash del contenido (`compute_candidacy_hash`), programando la ejecución para el siguiente día calendario según la zona horaria del usuario.
+   - **Reloj simulable (`core/clock.py`)**: Abstracción `Clock` con `MockClock` para control temporal determinista de días calendario y ventanas de ejecución en tests.
+   - **Scheduler y prevención de duplicados (`scheduling/service.py`)**: Cálculo de instante exacto UTC, clave de idempotencia `idempotency-v1` y detección de ventanas perdidas (`is_missed_window`).
+   - **Portal de prueba local (`portals/adapters/mock_adapter.py`)**: `MockPortalAdapter` en modo simulación estricto (`SIMULATION_MODE=true`), emitiendo recibos sintéticos `MOCK-CONF-XXXXX` y digest de evidencia auditable.
+   - **Worker durable (`execution/worker.py`)**: `DurableExecutionWorker` con locking atómico (`locked_by`), verificación de autorización en runtime antes de cualquier acción, ejecución segura, registro en `execution_logs` y actualización en `crm_entries` y `crm_events`.
+
+2. **Suite de Pruebas de Integración (`tests/integration/test_phase1_mvp_vertical.py`)**:
+   - `test_full_vertical_happy_path`: Flujo completo desde evaluación hasta confirmación en CRM con avance de reloj de miércoles a jueves.
+   - `test_modification_invalidates_approval` (REQ-017): Demuestra que editar la carta o CV invalida la aprobación previa, cancela la tarea en cola y exige nueva revisión humana.
+   - `test_rejection_blocks_execution` (REQ-018): Demuestra que el rechazo por el usuario bloquea y cancela de forma terminal cualquier postulación.
+   - `test_two_workers_do_not_execute_concurrently` (REQ-020): Demuestra exclusión mutua de claim atómico entre múltiples workers.
+   - `test_missed_window_does_not_send_unexpectedly` (REQ-023): Demuestra que un equipo inactivo que supera la ventana marca `missed_window` sin enviar a destiempo.
+   - `test_tenant_isolation` (SEC-002): Demuestra que operaciones con un `tenant_id` ajeno son rechazadas.
+
+3. **Resultados de Verificación**:
+   - `pytest tests/ -v`: **51 pruebas pasadas (24 subpruebas)** en 1.86s.
+   - `python3 scripts/check_secrets.py backend/app frontend/src`: Código 0 (cero secretos en código).
+   - `graphify update .`: Grafo actualizado a **522 nodos, 812 aristas, 82 comunidades** en `graphify-out/graph.json`. Consulta verificada con `graphify query "DurableExecutionWorker"`.
+
