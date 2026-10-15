@@ -57,6 +57,7 @@ class MockPortalAdapter:
         cover_letter: str,
         cv_payload: Dict[str, Any],
         actions: list,
+        idempotency_key: Optional[str] = None,
     ) -> PortalSubmissionResult:
         """
         Ejecuta la postulación en el portal de prueba.
@@ -77,6 +78,7 @@ class MockPortalAdapter:
             "portal": self.PORTAL_NAME,
             "simulation_mode": self.simulation_mode,
             "target_url": target_url,
+            "idempotency_key": idempotency_key,
             "submitted_at_utc": now.isoformat(),
             "confirmation_code": receipt_id,
             "evidence_digest": evidence_hash,

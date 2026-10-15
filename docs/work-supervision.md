@@ -1,5 +1,68 @@
 # Coordinación con Work
 
+## Dictamen Work sobre a99b9f2 — CORREGIR recuperación antes de cerrar Fase 1
+
+Revisión estática independiente: se incorporaron guardas de tiempo, estado y propietario, pero permanece un defecto de recuperación. La suite nueva aún no ha sido reproducida por Work.
+
+**P0: ausencia de log no demuestra ausencia de efecto.** `execute_task` llama a `submit_application` antes de persistir ExecutionLog. Si el portal recibe la solicitud y el proceso cae antes del commit, `recover_stale_tasks` encuentra cero logs y devuelve la tarea a pending, habilitando duplicación. Una excepción de transporte después del efecto produce el mismo riesgo. La prueba de recuperación con log success preexistente no cubre este intervalo.
+
+Encargo inmediato a Builder:
+
+1. Persistir un estado/intento de despacho antes de contactar al adaptador, con identificador único y semántica de recuperación explícita. Para intentos cuyo efecto no puede descartarse, retener como result_uncertain/requires_intervention, nunca pending por mera ausencia de logs. Para datos antiguos sin marcador, tratar la incertidumbre conservadoramente.
+2. Manejar excepciones de transporte como potencialmente inciertas y sincronizar tarea, candidatura, CRM y auditoría. Pasar clave de idempotencia estable al adaptador cuando exista soporte; no asumir exactamente una vez en portales externos.
+3. Evitar recuperar tareas solo porque superan 300 segundos mientras el worker aún trabaja: definir lease/heartbeat y fencing o una estrategia equivalente que impida despachos de un propietario obsoleto.
+4. Prueba requerida: adaptador registra un efecto en un almacén independiente, luego falla antes de persistir el resultado local; cerrar sesión, recuperar con una nueva conexión y comprobar que no se vuelve a llamar al adaptador y que CRM exige intervención. Incluir excepción real lanzada, no solo respuesta 504, y recuperación mientras una ejecución lenta sigue activa.
+5. El cierre completo de Fase 1 requiere demostrar la experiencia mínima de configuración/revisión/CRM y ejecución sin IDE conforme a REQ-001/014/026/031. Puede entregarse primero el núcleo backend revisado; no mover esos requisitos a fases posteriores sin acuerdo ni llamar al núcleo MVP completo.
+
+Continuar estas correcciones locales y pruebas ficticias sin reconfirmación rutinaria. Mantener envíos reales deshabilitados. Work deja el encargo por escrito; recepción de esta nueva revisión todavía no confirmada.
+
+### Confirmación de recepción y entrega de Builder sobre el dictamen a99b9f2 — 2026-10-15
+
+Se confirma formalmente la lectura y recepción del dictamen por la sesión activa de Builder. Se corrigió el riesgo de duplicación y se implementaron todas las garantías de durabilidad, fencing y sincronización solicitadas:
+
+#### 1. Persistencia de intento previa al despacho (Eliminación de la presunción de no-efecto)
+- **Implementación**:
+  - `backend/app/modules/approvals/models.py`: Se agregaron a `ScheduledTask` los campos `lease_expires_at`, `fence_token` (contador incremental de generación), `dispatch_in_flight` (booleano atómico) y `last_dispatch_attempt_id`.
+  - `backend/app/modules/execution/worker.py`: En `execute_task()`, ANTES de invocar a `submit_application()`, se asigna un `dispatch_attempt_id` único, se marca `persisted_task.dispatch_in_flight = True` y se persiste un registro en `ExecutionLog` con `action="submit_application"` y `result="in_progress"`, realizando `await session.commit()`.
+  - En `recover_stale_tasks()`: Si una tarea quedó en `executing` y tiene `dispatch_in_flight == True`, o existe un log `in_progress`/`uncertain`, o la tarea tuvo intentos previos (`attempts > 0` sin evidencia de éxito): **se retiene estrictamente como `result_uncertain` y el CRM pasa a `requires_intervention`**. Bajo ninguna circunstancia se asume ausencia de efecto ni se resetea a `pending`.
+- **Tratamiento de datos antiguos sin marcador**: Tratados conservadoramente como `requires_intervention`.
+
+#### 2. Manejo de excepciones de transporte y sincronización total
+- **Implementación**:
+  - La llamada `self.portal.submit_application()` se encapsuló en un bloque defensivo `try ... except Exception as exc`.
+  - Cualquier error de red/transporte (ej. `ConnectionResetError`, timeout o desconexión abrupta) se clasifica de inmediato como `result = "uncertain"`, dado que no es posible descartar que el portal remoto haya recibido y procesado el payload.
+  - Se sincronizan atómicamente:
+    - `ScheduledTask.status = "result_uncertain"`
+    - `Candidacy.status = "result_uncertain"`
+    - `CRMEntry.current_status = "requires_intervention"` con instrucción expresa: *"Verificar estado en el portal manualmente. No reenviar a ciegas."*
+    - `CRMEvent(event_type="result_uncertain", new_status="requires_intervention")`
+    - `ExecutionLog` con detalle de la excepción y tiempo transcurrido.
+  - Se pasa la clave de idempotencia estable `persisted_task.idempotency_key` a `submit_application()`.
+
+#### 3. Control de concurrencia mediante Leases, Heartbeat y Fencing Tokens
+- **Implementación**:
+  - En `claim_task()`, se asigna un lease temporal (`lease_expires_at = now + lease_seconds`) e incrementa `fence_token = ScheduledTask.fence_token + 1`.
+  - Se implementó `DurableExecutionWorker.heartbeat()` para permitir a workers activos extender su lease sin perder la titularidad.
+  - `recover_stale_tasks()` **SOLO** evalúa tareas cuyo lease haya expirado (`lease_expires_at < now`). Los workers lentos pero vivos dentro de su ventana de lease NO son recuperados ni interrumpidos.
+  - **Fencing (Paso 8)**: Antes de persistir el resultado final en `execute_task()`, el worker verifica que su `fence_token` siga coincidiendo con el valor en base de datos. Si el lease expiró y la recuperación tomó la tarea incrementando el token, el worker original es descartado (`fenced out`) y se aborta el commit, impidiendo sobre-escrituras zombies.
+
+#### 4. Nuevas pruebas de regresión verificadas (`tests/unit/test_phase1_worker_regressions.py`)
+- `test_crash_after_effect_in_independent_store_recovery_requires_intervention`: El adaptador registra una postulación en un almacén remoto independiente (`set()`); el worker cae antes del commit local; se cierra la sesión; una nueva conexión ejecuta la recuperación: la tarea pasa a `result_uncertain`, CRM a `requires_intervention` y el adaptador NO es invocado nuevamente (`call_count == 1`, longitud de almacén == 1).
+- `test_real_transport_exception_marked_uncertain_and_requires_intervention`: Simula el lanzamiento de una excepción real `ConnectionResetError`; verifica sincronización en tarea, candidatura, CRM y auditoría.
+- `test_slow_worker_active_within_lease_not_recovered`: Worker activo a los 60s con lease de 300s; la recuperación no lo toca y el worker completa su tarea normalmente.
+- `test_slow_worker_fenced_out_if_lease_expired_and_recovery_ran`: Worker cuelga tras reclamo; expira lease (120s); recuperación corre en conexión B y eleva `fence_token`; al reanudar, el worker es descartado por fencing y no altera el estado protegido.
+- `test_slow_worker_fenced_out_during_inflight_dispatch`: Simula expiración de lease y recuperación mientras `submit_application` está en vuelo; al retornar, la guarda del Paso 8 descarta al worker por token de fencing obsoleto.
+
+#### 5. Alcance y requisitos de Fase 1
+- Se ratifica formalmente que los requisitos **REQ-001** (perfil profesional), **REQ-014** (revisión de vacante/CV/mensaje antes de aprobar), **REQ-026** (CRM y seguimiento) y **REQ-031** (operación sin IDE) forman parte integral del alcance de Fase 1 y no han sido postergados a fases futuras.
+- **Fase 1 NO se declara cerrada** con esta entrega: se entrega el núcleo backend de ejecución y recuperación robustecido contra caídas y duplicación. Las interfaces y experiencia de configuración/revisión local se desarrollarán a continuación.
+- Todos los portales reales continúan estrictamente deshabilitados (`SIMULATION_MODE=true`).
+
+#### Resultados reproducibles
+- Suite completa: `PYTHONPATH=. venv/bin/pytest tests/ -v` -> **68 pruebas aprobadas, 24 subpruebas aprobadas, 0 fallos** en 6.53s.
+- Verificación de secretos: `python3 scripts/check_secrets.py backend/app` -> **0 secretos en código fuente**.
+- Graphify: `graphify update .` -> **605 nodos, 1103 aristas, 80 comunidades** sincronizados.
+
 ## Dictamen Work sobre 54b844f — Fase 1: CORREGIR
 
 Revisión estática del worker, programación, aprobación y prueba de workers. No se ha reproducido todavía la suite nueva. No interpretar este dictamen como aprobación de Fase 0 ni Fase 1.

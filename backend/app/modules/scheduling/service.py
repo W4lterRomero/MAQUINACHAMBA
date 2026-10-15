@@ -79,7 +79,10 @@ class SchedulingService:
 
         # 1. Comprobación estricta por instante UTC
         if task.execution_instant_utc is not None:
-            if now_utc < task.execution_instant_utc:
+            inst_utc = task.execution_instant_utc
+            if inst_utc.tzinfo is None:
+                inst_utc = inst_utc.replace(tzinfo=timezone.utc)
+            if now_utc < inst_utc:
                 return True
 
         # 2. Comprobación local respecto a fecha y hora programada
@@ -87,7 +90,10 @@ class SchedulingService:
             tz = ZoneInfo(task.execution_timezone)
             current_local = c.now(task.execution_timezone)
             win_start = execution_window_start or task.scheduled_time or time(9, 0)
-            window_start_dt = datetime.combine(task.scheduled_date, win_start, tzinfo=tz)
+            task_date = task.scheduled_date
+            if isinstance(task_date, datetime):
+                task_date = task_date.date()
+            window_start_dt = datetime.combine(task_date, win_start, tzinfo=tz)
             if current_local < window_start_dt:
                 return True
 
@@ -112,6 +118,8 @@ class SchedulingService:
         current_local = c.now(task.execution_timezone)
 
         task_date = task.scheduled_date
+        if isinstance(task_date, datetime):
+            task_date = task_date.date()
         window_end_dt = datetime.combine(task_date, execution_window_end, tzinfo=tz)
 
         # Si el momento actual ya rebasó la hora límite del día programado

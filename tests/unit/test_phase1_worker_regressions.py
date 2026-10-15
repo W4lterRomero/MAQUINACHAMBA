@@ -369,8 +369,8 @@ class TestDurabilityConcurrencyAndCrashRecovery:
     @pytest.mark.asyncio
     async def test_crash_before_adapter_effect_recovery(self, regression_db):
         """
-        Caída ANTES del efecto: la tarea quedó 'executing' pero no hay ExecutionLog.
-        La recuperación debe regresarla a 'pending' para reintento seguro.
+        P0: La ausencia de log no permite asumir que es seguro reenviar si la tarea estuvo en ejecución.
+        Para intentos cuyo efecto no puede descartarse, se retiene como 'requires_intervention'.
         """
         session_maker, _ = regression_db
         clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
@@ -382,9 +382,9 @@ class TestDurabilityConcurrencyAndCrashRecovery:
             worker = DurableExecutionWorker(worker_id="worker-crash-1", clock=clock)
             claimed = await worker.claim_task(session, task.id)
             assert claimed is not None
-            # Simular caída abrupta: el worker muere aquí, no se llama execute_task
+            # Simular caída abrupta: el worker muere aquí, sin log final
 
-        # Simular reinicio del sistema 10 minutos después
+        # Simular reinicio del sistema 10 minutos después (lease expirado)
         clock.advance_seconds(600)
         async with session_maker() as session:
             recovered = await DurableExecutionWorker.recover_stale_tasks(
@@ -393,11 +393,315 @@ class TestDurabilityConcurrencyAndCrashRecovery:
                 clock=clock,
             )
             assert len(recovered) == 1
-            assert recovered[0]["action"] == "reset_to_pending"
+            # Se retiene de forma conservadora para intervención humana, NUNCA pending ciego
+            assert recovered[0]["action"] == "flag_requires_intervention"
 
             fresh_task = await session.get(ScheduledTask, task.id)
-            assert fresh_task.status == "pending"
+            assert fresh_task.status == "result_uncertain"
             assert fresh_task.locked_by is None
+
+            crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == task.candidacy_id))
+            crm = crm_res.scalar_one()
+            assert crm.current_status == "requires_intervention"
+            assert "no reenviar a ciegas" in crm.next_action.lower()
+
+    @pytest.mark.asyncio
+    async def test_crash_after_effect_in_independent_store_recovery_requires_intervention(self, regression_db):
+        """
+        P0 requerida: Adaptador registra un efecto en un almacén independiente, luego el worker
+        cae antes de persistir el resultado local.
+        Cerrar sesión, recuperar con una nueva conexión y comprobar que NO se vuelve a llamar
+        al adaptador y que CRM exige intervención manual.
+        """
+        session_maker, _ = regression_db
+        clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
+
+        independent_portal_store = set()
+
+        class StoreTrackingAdapter(MockPortalAdapter):
+            def __init__(self):
+                super().__init__(simulation_mode=True)
+                self.call_count = 0
+
+            async def submit_application(self, *args, **kwargs):
+                self.call_count += 1
+                # Simular efecto completado en el portal remoto
+                independent_portal_store.add("SUBMISSION-ACCEPTED-ON-REMOTE-PORTAL")
+                return await super().submit_application(*args, **kwargs)
+
+        adapter = StoreTrackingAdapter()
+
+        # Sesión 1: Reclamar e iniciar despacho
+        async with session_maker() as session_1:
+            tenant, candidacy, approval, task = await _create_test_candidacy_and_task(session_1, clock)
+            clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
+
+            worker = DurableExecutionWorker(worker_id="worker-crash-store", clock=clock, portal_adapter=adapter)
+            claimed = await worker.claim_task(session_1, task.id)
+            assert claimed is not None
+
+            # Simular pre-despacho y llamada al portal
+            # Persistir marcador pre-despacho
+            claimed.dispatch_in_flight = True
+            claimed.last_dispatch_attempt_id = "disp-store-test-123"
+            in_prog = ExecutionLog(
+                tenant_id=tenant.id,
+                task_id=claimed.id,
+                candidacy_id=candidacy.id,
+                action="submit_application",
+                result="in_progress",
+                evidence={"dispatch_attempt_id": "disp-store-test-123", "idempotency_key": claimed.idempotency_key},
+                started_at=clock.now_utc(),
+            )
+            session_1.add(in_prog)
+            await session_1.commit()
+
+            # El adaptador procesa el efecto en su almacén independiente
+            await adapter.submit_application(
+                tenant_id=tenant.id,
+                target_url=candidacy.target_url,
+                applicant_data={"email": "carlos@example.com"},
+                cover_letter="test",
+                cv_payload={},
+                actions=[],
+                idempotency_key=claimed.idempotency_key,
+            )
+            assert len(independent_portal_store) == 1
+            assert adapter.call_count == 1
+            # ¡CRASH ABRUPTO AQUÍ! Se cierra la sesión sin guardar el resultado final local
+
+        # Sesión 2: Recuperación desde una NUEVA conexión tras expirar el lease
+        clock.advance_seconds(600)
+        async with session_maker() as session_2:
+            recovered = await DurableExecutionWorker.recover_stale_tasks(
+                session=session_2,
+                stale_threshold_seconds=300,
+                clock=clock,
+            )
+            assert len(recovered) == 1
+            assert recovered[0]["action"] == "flag_requires_intervention"
+
+            fresh_task = await session_2.get(ScheduledTask, task.id)
+            assert fresh_task.status == "result_uncertain"
+            assert fresh_task.dispatch_in_flight is False
+
+            crm_res = await session_2.execute(select(CRMEntry).where(CRMEntry.candidacy_id == task.candidacy_id))
+            crm = crm_res.scalar_one()
+            assert crm.current_status == "requires_intervention"
+            assert "no reenviar a ciegas" in crm.next_action.lower()
+
+            # Comprobar que el adaptador NO fue vuelto a llamar (call_count sigue siendo 1)
+            assert adapter.call_count == 1
+            assert len(independent_portal_store) == 1
+
+    @pytest.mark.asyncio
+    async def test_real_transport_exception_marked_uncertain_and_requires_intervention(self, regression_db):
+        """
+        P1 requerida: Excepción real de red/transporte (ConnectionResetError) durante submit_application.
+        Debe sincronizar tarea (result_uncertain), candidatura, CRM (requires_intervention)
+        y auditoría con el detalle de la excepción sin reintentar a ciegas.
+        """
+        session_maker, _ = regression_db
+        clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
+
+        class CrashingTransportAdapter(MockPortalAdapter):
+            def __init__(self):
+                super().__init__(simulation_mode=True)
+                self.call_count = 0
+
+            async def submit_application(self, *args, **kwargs):
+                self.call_count += 1
+                raise ConnectionResetError("Conexión reseteada por el peer remoto durante la transferencia")
+
+        adapter = CrashingTransportAdapter()
+
+        async with session_maker() as session:
+            tenant, candidacy, approval, task = await _create_test_candidacy_and_task(session, clock)
+            clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
+
+            worker = DurableExecutionWorker(worker_id="worker-transport-exc", clock=clock, portal_adapter=adapter)
+            claimed = await worker.claim_task(session, task.id)
+            assert claimed is not None
+
+            # Ejecutar tarea: el adaptador lanza ConnectionResetError
+            success, msg = await worker.execute_task(session, claimed)
+            assert success is False
+            assert "requires_intervention" in msg.lower() or "incierto" in msg.lower()
+            assert adapter.call_count == 1
+
+            # Verificar sincronización completa
+            fresh_task = await session.get(ScheduledTask, task.id)
+            assert fresh_task.status == "result_uncertain"
+            assert fresh_task.dispatch_in_flight is False
+
+            fresh_candidacy = await session.get(Candidacy, candidacy.id)
+            assert fresh_candidacy.status == "result_uncertain"
+
+            crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == candidacy.id))
+            crm = crm_res.scalar_one()
+            assert crm.current_status == "requires_intervention"
+            assert "no reenviar a ciegas" in crm.next_action.lower()
+
+            # Registro de auditoría
+            log_res = await session.execute(
+                select(ExecutionLog)
+                .where(ExecutionLog.task_id == task.id)
+                .order_by(ExecutionLog.started_at.desc())
+            )
+            logs = log_res.scalars().all()
+            assert len(logs) >= 1
+            assert logs[0].result == "uncertain"
+            assert "ConnectionResetError" in logs[0].error_message
+
+    @pytest.mark.asyncio
+    async def test_slow_worker_active_within_lease_not_recovered(self, regression_db):
+        """
+        P1 requerida: Una ejecución lenta pero activa (lease vigente) NO debe ser recuperada
+        ni interrumpida por recover_stale_tasks.
+        """
+        session_maker, _ = regression_db
+        clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
+
+        async with session_maker() as session:
+            tenant, candidacy, approval, task = await _create_test_candidacy_and_task(session, clock)
+            clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
+
+            adapter = CountingMockAdapter()
+            worker = DurableExecutionWorker(worker_id="worker-slow-1", clock=clock, portal_adapter=adapter)
+
+            # Reclamar con lease de 300 segundos
+            claimed = await worker.claim_task(session, task.id, lease_seconds=300)
+            assert claimed is not None
+            assert claimed.lease_expires_at is not None
+
+            # Avanzar 60 segundos (el worker sigue activo dentro de su ventana de lease)
+            clock.advance_seconds(60)
+
+            # Intentar recuperación: debe retornar lista vacía porque el lease no ha vencido
+            recovered = await DurableExecutionWorker.recover_stale_tasks(
+                session=session,
+                stale_threshold_seconds=300,
+                clock=clock,
+            )
+            assert len(recovered) == 0
+
+            # El worker sigue siendo dueño y puede completar su tarea exitosamente
+            success, _ = await worker.execute_task(session, claimed)
+            assert success is True
+            assert claimed.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_slow_worker_fenced_out_if_lease_expired_and_recovery_ran(self, regression_db):
+        """
+        P1 requerida: Si el lease expira y la recuperación toma la tarea, el worker original
+        queda descartado mediante fencing (fenced out) y no puede sobre-escribir con éxito.
+        """
+        session_maker_a, session_maker_b = regression_db
+        clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
+
+        async with session_maker_a() as session_a:
+            tenant, candidacy, approval, task = await _create_test_candidacy_and_task(session_a, clock)
+            task_id = task.id
+
+        clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
+
+        adapter = CountingMockAdapter()
+        worker = DurableExecutionWorker(worker_id="worker-slow-zombie", clock=clock, portal_adapter=adapter)
+
+        # Worker A reclama con lease corto de 60 segundos
+        async with session_maker_a() as session_a:
+            claimed = await worker.claim_task(session_a, task_id, lease_seconds=60)
+            assert claimed is not None
+            original_fence_token = claimed.fence_token
+
+        # Simular que el worker cuelga y el tiempo avanza 120 segundos (lease expirado)
+        clock.advance_seconds(120)
+
+        # Proceso de recuperación corre en Conexión B y detecta el lease vencido
+        async with session_maker_b() as session_b:
+            recovered = await DurableExecutionWorker.recover_stale_tasks(
+                session=session_b,
+                stale_threshold_seconds=60,
+                clock=clock,
+            )
+            assert len(recovered) == 1
+            assert recovered[0]["action"] == "flag_requires_intervention"
+
+            b_task = await session_b.get(ScheduledTask, task_id)
+            assert b_task.fence_token > original_fence_token
+            assert b_task.status == "result_uncertain"
+
+        # Ahora el Worker A "despierta" y trata de ejecutar la tarea con su token viejo
+        async with session_maker_a() as session_a:
+            success, msg = await worker.execute_task(session_a, claimed)
+            # Debe ser descartado porque la tarea fue recuperada (estado cambiado / fencing token obsoleto)
+            assert success is False
+            assert (
+                "estado inválido" in msg.lower()
+                or "fencing obsoleto" in msg.lower()
+                or "perdió lease" in msg.lower()
+            )
+
+            # La base de datos conserva el estado protegido por la recuperación
+            fresh = await session_a.get(ScheduledTask, task_id)
+            assert fresh.status == "result_uncertain"
+
+    @pytest.mark.asyncio
+    async def test_slow_worker_fenced_out_during_inflight_dispatch(self, regression_db):
+        """
+        P1 requerida: Fencing durante despacho en vuelo (Paso 8).
+        El worker pasa el paso 0 y llama a submit_application.
+        Mientras el adaptador está ejecutando, el lease expira y la recuperación
+        incrementa el fence_token en Conexión B.
+        Al regresar submit_application, el worker es descartado en el Paso 8 por token obsoleto.
+        """
+        session_maker_a, session_maker_b = regression_db
+        clock = MockClock(datetime(2026, 10, 15, 16, 0, 0, tzinfo=timezone.utc))
+
+        async with session_maker_a() as session_a:
+            tenant, candidacy, approval, task = await _create_test_candidacy_and_task(session_a, clock)
+            task_id = task.id
+
+        clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
+
+        class InflightFencingAdapter(MockPortalAdapter):
+            def __init__(self):
+                super().__init__(simulation_mode=True)
+                self.call_count = 0
+
+            async def submit_application(self, *args, **kwargs):
+                self.call_count += 1
+                # Simular que el lease expiró mientras el adaptador esperaba respuesta remota
+                # y el proceso de recuperación corrió en Conexión B
+                clock.advance_seconds(120)
+                async with session_maker_b() as session_b:
+                    await DurableExecutionWorker.recover_stale_tasks(
+                        session=session_b,
+                        stale_threshold_seconds=60,
+                        clock=clock,
+                    )
+                return await super().submit_application(*args, **kwargs)
+
+        adapter = InflightFencingAdapter()
+        worker = DurableExecutionWorker(worker_id="worker-inflight-zombie", clock=clock, portal_adapter=adapter)
+
+        async with session_maker_a() as session_a:
+            claimed = await worker.claim_task(session_a, task_id, lease_seconds=60)
+            assert claimed is not None
+
+            # execute_task arranca con el fence_token original
+            success, msg = await worker.execute_task(session_a, claimed)
+            # Debe fallar específicamente en el paso 8 por fencing token obsoleto
+            assert success is False
+            assert "fencing obsoleto" in msg.lower() or "perdió lease" in msg.lower()
+
+            # Comprobar que el worker no sobre-escribió el estado y fue descartado
+            assert claimed.status != "completed"
+
+        async with session_maker_b() as session_b:
+            fresh = await session_b.get(ScheduledTask, task_id)
+            assert fresh.status == "result_uncertain"
+            assert fresh.fence_token == 3
 
     @pytest.mark.asyncio
     async def test_crash_after_adapter_effect_recovery_without_duplicate_send(self, regression_db):

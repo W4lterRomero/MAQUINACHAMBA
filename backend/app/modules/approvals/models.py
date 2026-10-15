@@ -117,6 +117,14 @@ class ScheduledTask(Base):
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Control de leases y fencing para evitar sobre-escrituras por workers obsoletos (fencing token)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    fence_token: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Marcador de despacho en vuelo para prevenir reenvíos ciegos ante caídas intermedias
+    dispatch_in_flight: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_dispatch_attempt_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
 class ExecutionLog(Base):
