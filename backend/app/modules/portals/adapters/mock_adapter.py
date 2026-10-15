@@ -21,6 +21,7 @@ class PortalSubmissionResult:
     status_code: int
     evidence: Dict[str, Any]
     error_message: Optional[str] = None
+    result_type: str = "success"  # "success", "failure", "uncertain"
 
 
 class MockPortalAdapter:
@@ -37,10 +38,16 @@ class MockPortalAdapter:
         "mode": "simulation_only",
     }
 
-    def __init__(self, simulation_mode: Optional[bool] = None):
+    def __init__(
+        self,
+        simulation_mode: Optional[bool] = None,
+        result_override: Optional[PortalSubmissionResult] = None,
+    ):
         self.simulation_mode = (
             simulation_mode if simulation_mode is not None else get_settings().simulation_mode
         )
+        self.submission_count: int = 0
+        self.result_override = result_override
 
     async def submit_application(
         self,
@@ -55,6 +62,9 @@ class MockPortalAdapter:
         Ejecuta la postulación en el portal de prueba.
         Genera recibo sintético y evidencia inmutable.
         """
+        self.submission_count += 1
+        if self.result_override is not None:
+            return self.result_override
         now = datetime.now(timezone.utc)
         receipt_id = f"MOCK-CONF-{uuid.uuid4().hex[:10].upper()}"
 

@@ -65,6 +65,14 @@ class MockClock(Clock):
         else:
             self._current_utc = new_time.astimezone(timezone.utc)
 
+    def advance(self, delta: timedelta) -> None:
+        """Avanza el reloj según el timedelta indicado."""
+        self._current_utc += delta
+
+    def advance_seconds(self, seconds: float) -> None:
+        """Avanza el reloj N segundos."""
+        self._current_utc += timedelta(seconds=seconds)
+
     def advance_hours(self, hours: float) -> None:
         """Avanza el reloj N horas."""
         self._current_utc += timedelta(hours=hours)

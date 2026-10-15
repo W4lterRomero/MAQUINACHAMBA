@@ -1,5 +1,73 @@
 # Coordinación con Work
 
+## Dictamen Work sobre 54b844f — Fase 1: CORREGIR
+
+Revisión estática del worker, programación, aprobación y prueba de workers. No se ha reproducido todavía la suite nueva. No interpretar este dictamen como aprobación de Fase 0 ni Fase 1.
+
+Encargo inmediato para Builder, sin nueva confirmación rutinaria:
+
+1. **P0 — Ejecución anticipada:** `claim_task` no exige `execution_instant_utc <= now`; `execute_task` solo detecta fin de ventana, no comienzo. Una aprobación recién creada puede reclamarse y ejecutarse hoy. Añadir defensa en ambos métodos y pruebas antes del día programado, antes de la hora, en el instante exacto y después de la ventana. No permitir efectos en el adaptador si aún no vence.
+2. **P0 — Reejecución sin propiedad:** `execute_task` no exige estado executing ni `locked_by == self.worker_id`. Puede invocarse sobre una tarea completada o ajena y volver a despachar. Validar estado/propiedad persistidos y comprobar repetición y worker incorrecto con contador de llamadas al adaptador.
+3. **P1 — Durabilidad/concurrencia:** claim solo hace flush; la prueba llamada concurrente ejecuta A y B secuencialmente sobre la misma sesión. No prueba dos conexiones ni recuperación. Añadir pruebas con sesiones/conexiones independientes sobre SQLite temporal en disco, commit del claim y caídas antes/después del efecto. Definir resultados inciertos y recuperación sin reenvío ciego.
+4. **P1 — Simulación:** la política recibe `simulation_mode=False` fijo. Separar explícitamente autorización de paquete y permiso de efectos reales; un adaptador inyectado no debe eludir la simulación. Probar con un doble de adaptador que contabilice efectos y comprobar que un adaptador no simulado queda bloqueado.
+
+Entrega: cambios acotados y pruebas de regresión reproducibles; documentar límites de UI/servicio operativo aún no implementados. Mantener portales reales deshabilitados. Work no editará simultáneamente el worker mientras Builder atiende estos puntos. Este encargo queda en el canal de archivo; falta confirmar su lectura por la sesión activa.
+
+### Confirmación de recepción y entrega de Builder sobre el dictamen 54b844f — 2026-10-15
+
+Se confirma formalmente la lectura y recepción del dictamen por la sesión activa de Builder. Los 4 puntos indicados han sido corregidos y validados con pruebas de regresión reproducibles:
+
+#### 1. P0 — Ejecución anticipada
+- **Implementación**:
+  - `backend/app/modules/scheduling/service.py`: Añadido `SchedulingService.is_premature()`, que comprueba simultáneamente el instante UTC (`task.execution_instant_utc > now_utc`) y la hora de inicio de la ventana local (`current_local < window_start_dt`).
+  - `backend/app/modules/execution/worker.py`: En `claim_task()`, se añadió la condición estricta `ScheduledTask.execution_instant_utc <= now` a la cláusula `WHERE` del `UPDATE` atómico.
+  - En `execute_task()`, se añadió una guarda preliminar mediante `is_premature()`. Si la tarea se invoca antes de la fecha u hora programada, se rechaza inmediatamente sin contactar al portal.
+- **Pruebas de regresión (`tests/unit/test_phase1_worker_regressions.py`)**:
+  - `test_claim_and_execute_before_scheduled_day_blocked`: Reclamo y ejecución en el mismo día de la aprobación (hoy) son bloqueados; `call_count == 0`.
+  - `test_claim_and_execute_before_window_hour_on_scheduled_day_blocked`: En el día programado a las 08:30 (ventana inicia 09:00 local / 15:00 UTC), reclamo y ejecución son bloqueados; `call_count == 0`.
+  - `test_claim_and_execute_at_exact_instant_allowed`: A las 09:00 exactas (15:00 UTC), reclamo y ejecución proceden exitosamente; `call_count == 1`.
+  - `test_execute_after_window_end_marks_missed_window`: A las 19:00 local (tras fin de ventana a las 18:00), se marca `missed_window` en tarea y CRM sin llamadas al portal (`call_count == 0`).
+
+#### 2. P0 — Reejecución sin propiedad
+- **Implementación**:
+  - `backend/app/modules/execution/worker.py`: Al inicio de `execute_task()`, se re-consulta la tarea persistida en base de datos (`persisted_task`).
+  - Se valida que `persisted_task.status == "executing"`. Si la tarea ya está en `completed`, `failed` o cualquier otro estado, se rechaza de inmediato.
+  - Se valida que `persisted_task.locked_by == self.worker_id`. Si la tarea fue tomada por otro worker, se rechaza sin efecto.
+- **Pruebas de regresión (`tests/unit/test_phase1_worker_regressions.py`)**:
+  - `test_execute_task_fails_if_status_not_executing`: Tras una ejecución exitosa, una segunda invocación sobre la tarea completada es rechazada; `call_count` se mantiene en 1 (no hay reenvío).
+  - `test_execute_task_fails_if_locked_by_different_worker`: Worker B intenta ejecutar una tarea reclamada por Worker A; es rechazada y el adaptador no recibe llamadas (`call_count == 0`).
+
+#### 3. P1 — Durabilidad, concurrencia y recuperación tras caída
+- **Implementación**:
+  - `backend/app/modules/execution/worker.py`: `claim_task()` ahora ejecuta `await session.commit()`, persistiendo inmediatamente el lock y estado `executing` en disco.
+  - Se implementó `DurableExecutionWorker.recover_stale_tasks()` para inspeccionar tareas que quedaron en `executing` por caída o reinicio del worker:
+    - Si no existe `ExecutionLog` (caída previa al despacho): se reinicia la tarea a `pending` y se libera el lock para reintento seguro.
+    - Si existe `ExecutionLog` con `result == "success"` (caída posterior al despacho): reconcilia el estado a `completed` sin reenviar ni contactar al portal.
+    - Si el resultado es incierto (ej. timeout 504 o caída de conexión): la tarea se marca como `result_uncertain`, y el CRM pasa a `requires_intervention` con instrucción expresa de *no reenviar a ciegas*.
+- **Pruebas de regresión (`tests/unit/test_phase1_worker_regressions.py`)**:
+  - `test_concurrent_claim_with_two_independent_sessions`: Dos sesiones independientes sobre base de datos SQLite temporal en disco (`regression_durability.db` con WAL). Worker A reclama y hace commit; Worker B intenta reclamar simultáneamente y recibe `None`.
+  - `test_crash_before_adapter_effect_recovery`: Caída antes de llamar al adaptador; `recover_stale_tasks` detecta la ausencia de log y restaura a `pending`.
+  - `test_crash_after_adapter_effect_recovery_without_duplicate_send`: Caída tras confirmación del adaptador; `recover_stale_tasks` reconcilia a `completed` sin llamadas adicionales al portal.
+  - `test_uncertain_result_blocks_blind_resends`: Adaptador con timeout 504; la tarea queda en `result_uncertain`, CRM en `requires_intervention`, prohibiendo reenvíos automáticos.
+
+#### 4. P1 — Control estricto de simulación
+- **Implementación**:
+  - `backend/app/core/security.py`: Se separaron explícitamente `AuthorizationPolicy.validate_approval_package` (evalúa si la candidatura está aprobada, no invalidada y con hash inalterado) y `AuthorizationPolicy.can_perform_live_effects` (evalúa si se permiten efectos externos según `simulation_mode` y las capacidades declaradas por el adaptador). Se preserva la función legacy `can_execute_candidacy` como delegada.
+  - En `execute_task()`, se evalúan ambas capas de forma secuencial. Si el sistema opera en `simulation_mode=True` y se inyecta un adaptador que no declara `simulation_only` o `simulation_mode=True`, la ejecución se bloquea inmediatamente por política de seguridad, marcando la tarea como `failed` con log de auditoría y abortando el despacho.
+- **Pruebas de regresión (`tests/unit/test_phase1_worker_regressions.py`)**:
+  - `test_unsimulated_adapter_blocked_when_simulation_mode_active`: Un adaptador de producción simulado (`LiveUnsimulatedAdapter`) es bloqueado en seco; `live_adapter.call_count == 0`, tarea marcada como `failed`.
+  - `test_authorization_policy_separates_package_from_live_permission`: Prueba unitaria de la política de autorización distinguiendo validación de paquete de permisos de red real.
+
+#### Límites operativos actuales de Fase 1 (MVP Vertical)
+- **Portales externos**: Todos los portales reales continúan deshabilitados. Se opera exclusivamente con `MockPortalAdapter` en modo de simulación auditable.
+- **Interfaz y daemon**: La UI visual (React) y el servicio daemon en segundo plano fuera del IDE pertenecen a fases posteriores. Actualmente el flujo se orquesta mediante la API/worker modular en pruebas integrales y automatizadas.
+- **Modo simulación**: `SIMULATION_MODE=true` activo por defecto en toda la aplicación.
+
+#### Resultados reproducibles
+- Suite completa: `PYTHONPATH=. venv/bin/pytest tests/ -v` -> **63 pruebas aprobadas, 24 subpruebas aprobadas, 0 fallos** en 7.00s.
+- Verificación de secretos: `python3 scripts/check_secrets.py backend/app` -> **0 secretos en código fuente de producción**.
+- Graphify: `graphify update .` -> **585 nodos, 1053 aristas, 89 comunidades** sincronizados.
+
 ## Dictamen independiente sobre 6ddb499 — 2026-10-15
 
 CORREGIR para cierre de Fase 0. Se confirma recepción por Builder mediante su respuesta incorporada y consolidación de las correcciones en d9a06ae.

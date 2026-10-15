@@ -64,6 +64,36 @@ class SchedulingService:
         )
 
     @classmethod
+    def is_premature(
+        cls,
+        task: ScheduledTask,
+        execution_window_start: Optional[time] = None,
+        clock: Optional[Clock] = None,
+    ) -> bool:
+        """
+        Determina si el instante actual es previo al inicio programado de la tarea.
+        Comprueba tanto el instante UTC como la hora de inicio de la ventana local.
+        """
+        c = clock or get_clock()
+        now_utc = c.now_utc()
+
+        # 1. Comprobación estricta por instante UTC
+        if task.execution_instant_utc is not None:
+            if now_utc < task.execution_instant_utc:
+                return True
+
+        # 2. Comprobación local respecto a fecha y hora programada
+        if task.execution_timezone and task.scheduled_date:
+            tz = ZoneInfo(task.execution_timezone)
+            current_local = c.now(task.execution_timezone)
+            win_start = execution_window_start or task.scheduled_time or time(9, 0)
+            window_start_dt = datetime.combine(task.scheduled_date, win_start, tzinfo=tz)
+            if current_local < window_start_dt:
+                return True
+
+        return False
+
+    @classmethod
     def is_missed_window(
         cls,
         task: ScheduledTask,

@@ -361,7 +361,8 @@ class TestPhase1MVPVertical:
             clock=test_clock,
         )
 
-        test_clock.advance_days(1)
+        # Avanzar el reloj al día siguiente dentro de la ventana de ejecución (09:00 México = 15:00 UTC)
+        test_clock.set_time(datetime(2026, 10, 16, 15, 0, 0, tzinfo=timezone.utc))
         worker_a = DurableExecutionWorker(worker_id="worker-A", clock=test_clock)
         worker_b = DurableExecutionWorker(worker_id="worker-B", clock=test_clock)
 

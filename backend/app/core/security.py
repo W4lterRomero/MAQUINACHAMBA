@@ -25,20 +25,16 @@ class AuthorizationPolicy:
     """
 
     @staticmethod
-    def can_execute_candidacy(
+    def validate_approval_package(
         approval_decision: str,
         approval_content_hash: str,
         current_content_hash: str,
         approval_invalidated: bool,
-        simulation_mode: bool,
     ) -> tuple[bool, str]:
         """
-        Verifica si una candidatura puede ejecutarse.
-        Returns: (allowed, reason)
+        Verifica la validez e integridad del paquete aprobado por el usuario.
+        Independiente del entorno de ejecución (simulación o real).
         """
-        if simulation_mode:
-            return False, "Modo simulación activo. No se ejecutan acciones reales."
-
         if approval_decision != "approved":
             return False, f"Candidatura no aprobada. Estado: {approval_decision}"
 
@@ -50,6 +46,54 @@ class AuthorizationPolicy:
                 "El contenido ha cambiado desde la aprobación. "
                 "Requiere nueva revisión."
             )
+
+        return True, "Paquete de candidatura íntegro y debidamente aprobado."
+
+    @staticmethod
+    def can_perform_live_effects(
+        simulation_mode: bool,
+        adapter_mode: Optional[str] = None,
+        is_simulation_adapter: bool = False,
+    ) -> tuple[bool, str]:
+        """
+        Determina si se permiten efectos externos reales o si deben permanecer simulados.
+        Un adaptador sin capacidades de simulación queda estrictamente bloqueado si simulation_mode=True.
+        """
+        if simulation_mode:
+            # En modo simulación, SOLO se permiten adaptadores explícitamente simulados
+            if not is_simulation_adapter and adapter_mode != "simulation_only":
+                return False, (
+                    "Bloqueo de seguridad: Modo simulación activo. "
+                    "El adaptador no es de simulación y generaría efectos externos reales no autorizados."
+                )
+            return True, "Modo simulación verificado: el adaptador opera en modo simulado seguro."
+
+        return True, "Modo real habilitado."
+
+    @classmethod
+    def can_execute_candidacy(
+        cls,
+        approval_decision: str,
+        approval_content_hash: str,
+        current_content_hash: str,
+        approval_invalidated: bool,
+        simulation_mode: bool,
+    ) -> tuple[bool, str]:
+        """
+        Verifica si una candidatura puede ejecutarse con efectos externos reales.
+        Combina validación del paquete y verificación de modo no simulado.
+        """
+        pkg_valid, pkg_reason = cls.validate_approval_package(
+            approval_decision=approval_decision,
+            approval_content_hash=approval_content_hash,
+            current_content_hash=current_content_hash,
+            approval_invalidated=approval_invalidated,
+        )
+        if not pkg_valid:
+            return False, pkg_reason
+
+        if simulation_mode:
+            return False, "Modo simulación activo. No se ejecutan acciones reales."
 
         return True, "Autorizada para ejecución."
 
