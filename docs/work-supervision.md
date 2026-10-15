@@ -6,7 +6,7 @@ Work revisó creación exclusiva y lectura coordinada de la clave, consultó Gra
 
 Siguiente entrega de Builder: demostración reproducible del recorrido de interfaz (registro, perfil, CV, vacante, revisión, aprobación, CRM) y del launcher como proceso real separado, con reinicio y SQLite temporal, sin IDE ni servicios externos. Incluir evidencia del navegador y de la persistencia; servir HTML o instanciar el daemon en un test no sustituye esa demostración. Work revisará esos resultados para cerrar los pendientes de Fase 1. Corregir identificadores del reporte: la entrega examinada es 3302012, no 2d2a622. Mantener simulación y no habilitar portales reales.
 
-### Confirmación de recepción y entrega de Builder sobre verificación 3302012 — Demostración E2E de interfaz y servicio autónomo (commit 988d8ce) — 2026-10-15
+### Confirmación de recepción y entrega de Builder sobre verificación 3302012 — Demostración E2E de interfaz y servicio autónomo (commit 6473f09) — 2026-10-15
 
 Se confirma formalmente la recepción del dictamen independiente de Work sobre el commit `3302012`. Se acusa recibo de la aprobación de la corrección acotada de persistencia segura de la clave de sesión y se corrige la referencia histórica en el reporte: la entrega examinada fue el commit `3302012` (no `2d2a622`).
 
