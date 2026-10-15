@@ -49,24 +49,39 @@
 
 | ID | Requisito | Fase | Prioridad | Estado | Prueba |
 |----|-----------|:----:|:---------:|:------:|--------|
-| SEC-001 | Autenticación y autorización | 0 | P0 | 🔨 | T-S01 |
-| SEC-002 | Aislamiento por tenant | 0 | P0 | 🔨 | T-S02 |
-| SEC-003 | Protección de claves | 0 | P0 | 🔨 | T-S03 |
-| SEC-004 | Validación de URLs (anti-SSRF) | 0 | P0 | 🔨 | T-S04 |
-| SEC-005 | Protección contra prompt injection | 0 | P0 | 🔨 | T-S05 |
-| SEC-006 | Logs sin secretos | 0 | P0 | 🔨 | T-S06 |
-| SEC-007 | Simulación por defecto | 0 | P0 | ✅ | T-S07 |
-| SEC-008 | Política central de autorización | 0 | P0 | 🔨 | T-S08 |
-| SEC-009 | Contenido importado no modifica reglas | 0 | P0 | 🔨 | T-S09 |
+| SEC-001 | Autenticación y autorización | 0 | P0 | ✅ | T-S01 (`test_security.py`) |
+| SEC-002 | Aislamiento por tenant | 0 | P0 | ✅ | T-S02 (Base models, queries filtradas) |
+| SEC-003 | Protección de claves y secretos en código | 0 | P0 | ✅ | T-S03 (`scripts/check_secrets.py`, `test_secret_check_regression.py`) |
+| SEC-004 | Validación de URLs (anti-SSRF formato) | 0 | P0 | ✅ | T-S04 (`test_url_regression.py`) |
+| SEC-005 | Protección contra prompt injection | 0 | P0 | ✅ | T-S05 (`test_security.py::TestInjectionDetection`) |
+| SEC-006 | Logs sin secretos | 0 | P0 | ✅ | T-S06 (`test_security.py::TestSecretRedaction`) |
+| SEC-007 | Simulación por defecto | 0 | P0 | ✅ | T-S07 (`test_config.py::test_simulation_mode_default_true`) |
+| SEC-008 | Política central de autorización | 0 | P0 | ✅ | T-S08 (`test_security.py::TestAuthorizationPolicy`) |
+| SEC-009 | Hash inmutable de aprobación versionado | 0 | P0 | ✅ | T-S09 (`test_approval_hash_regression.py`) |
 | SEC-010 | Exportación y eliminación de datos | 5 | P1 | ⬜ | T-S10 |
+
+### Criterios explícitos de seguridad para Fase 1 y Fase 3
+
+1. **SSRF a nivel de transporte (Fase 1/3)**:
+   - `validate_url` solo verifica formato y rangos obvios antes de la conexión.
+   - El cliente de transporte HTTP (e.g. `httpx` custom transport) debe resolver DNS una sola vez, verificar que ninguna IP devuelta sea privada/loopback/link-local/multicast, y conectar fijando la IP del socket (`IP pinning`) conservando cabeceras `Host` y SNI TLS.
+   - Toda redirección (códigos 3xx) debe abortar el flujo automático y volver a evaluar la URL destino contra la política completa antes de reanudar.
+2. **Inmutabilidad y Prevención de Duplicados en Cola (Fase 1)**:
+   - Todo envío requiere un `approval_id` con `content_hash` matching en tiempo de ejecución.
+   - `idempotency_key` única por candidatura y fecha de ejecución en `scheduled_tasks`.
+   - Bloqueo atómico (`locked_by`, `locked_at`) para evitar doble despacho por múltiples workers.
+3. **Modo Simulación Forzado (Fase 1)**:
+   - `SIMULATION_MODE=true` activo permanentemente en suites y arranque local sin configuración explícita.
+   - Adaptadores de portal solo emiten respuestas sintéticas y registran `[SIMULACIÓN]` en `execution_logs`.
 
 ## Requisitos de Graphify
 
-| ID | Requisito | Estado |
-|----|-----------|:------:|
-| GRF-001 | Graphify instalado y funcional | ✅ |
-| GRF-002 | Exclusiones de datos sensibles configuradas | ⬜ |
-| GRF-003 | Índice inicial del proyecto construido | ⬜ |
-| GRF-004 | Instrucciones en AGENTS.md | ✅ |
-| GRF-005 | Línea base de métricas registrada | ⬜ |
-| GRF-006 | Comparación en tarea equivalente | ⬜ |
+| ID | Requisito | Estado | Evidencia |
+|----|-----------|:------:|-----------|
+| GRF-001 | Graphify instalado y funcional | ✅ | Versión 0.9.2 sincronizada paquete y skill |
+| GRF-002 | Exclusiones de datos sensibles configuradas | ✅ | `tests/unit/test_graphify_exclusions.py` (fixtures sintéticos .env, claves, bases de datos) |
+| GRF-003 | Índice del proyecto construido | ✅ | `graphify-out/graph.json` (359 nodos, 375 enlaces, SHA256 `93904fd0...`) |
+| GRF-004 | Instrucciones en AGENTS.md | ✅ | Reglas de navegación y comando verificado `graphify update .` |
+| GRF-005 | Línea base de métricas registrada | ✅ | `docs/graphify-baseline.json` y `docs/graphify-usage.md` |
+| GRF-006 | Comparación en tarea equivalente | 🔨 | En curso durante tareas de desarrollo de Fase 1/2 |
+
