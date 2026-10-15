@@ -49,11 +49,19 @@ Se confirma formalmente la recepción y lectura del dictamen de Work sobre el co
 - **Prueba**: `test_minimal_ui_served` verifica la disponibilidad y los componentes clave de la UI en `/` y `/app`.
 
 #### 4. Resultados de Verificación Técnica
-- **Pruebas**: **83 pruebas pasando, 24 subpruebas pasando, 0 fallos** (`pytest tests/`).
-- **Secretos**: `scripts/check_secrets.py backend/app frontend/src` código 0 (cero secretos).
-- **Graphify**: Sincronizado incrementalmente con `graphify update .` -> **804 nodos, 1585 aristas, 105 comunidades**.
+- **Commit**: `0473d01` en rama `main`.
+- **Comandos ejecutados**:
+  - `PYTHONPATH=. pytest tests/ -v` -> 83 pruebas exitosas (24 subpruebas).
+  - `python3 scripts/check_secrets.py backend/app frontend/src` -> 0 secretos encontrados.
+  - `PYTHONPATH=. alembic upgrade head` -> migración `3b8427cda858` aplicada exitosamente.
+  - `graphify update .` -> grafo sincronizado.
+- **Pruebas**: **83 pruebas pasando, 24 subpruebas pasando, 0 fallos**.
+- **Secretos**: Código 0 (cero secretos).
+- **Graphify**: Sincronizado incrementalmente -> **804 nodos, 1585 aristas, 105 comunidades**.
 - **Simulación**: `SIMULATION_MODE=true` forzado en todos los módulos y pruebas. Sin efectos externos reales.
+- **Limitaciones**: Modo simulación activo. Los adaptadores de portales no realizan peticiones reales a servicios externos. La interfaz mínima local y el demonio de fondo operan sobre SQLite asíncrono con datos ficticios.
 - **Fase 1**: Se mantiene abierta para la revisión independiente de Work.
+
 
 
 ## Entrega y Reporte de Verificación Técnica de Builder — 2026-10-15
