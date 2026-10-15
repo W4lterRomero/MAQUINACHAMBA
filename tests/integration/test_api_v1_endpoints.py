@@ -1,7 +1,8 @@
 """
 Pruebas de integración de la API REST v1.
 Verifica endpoints de perfil, vacantes, evaluaciones, aprobaciones, CRM,
-ciclo de ejecución y aislamiento estricto por tenant_id (REQ-001, 007, 010, 014, 015, 017, 018, 026, 031, SEC-002).
+ciclo de ejecución y aislamiento estricto por tenant_id resuelto del lado del servidor
+(REQ-001, 007, 010, 014, 015, 017, 018, 026, 031, SEC-001, SEC-002).
 """
 
 import pytest
@@ -19,9 +20,9 @@ async def test_api_health(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_profile_and_cv_api_flow(client: AsyncClient, test_tenant_id: str):
-    """REQ-001 y REQ-004: Configuración de perfil profesional y CVs vía API."""
-    headers = {"X-Tenant-ID": test_tenant_id}
+async def test_profile_and_cv_api_flow(client: AsyncClient, auth_headers: dict, test_tenant_id: str):
+    """REQ-001 y REQ-004: Configuración de perfil profesional y CVs vía API autenticada."""
+    headers = auth_headers
 
     # 1. Crear perfil
     profile_payload = {
@@ -73,9 +74,9 @@ async def test_profile_and_cv_api_flow(client: AsyncClient, test_tenant_id: str)
 
 
 @pytest.mark.asyncio
-async def test_vacancies_api_and_deduplication(client: AsyncClient, test_tenant_id: str):
+async def test_vacancies_api_and_deduplication(client: AsyncClient, auth_headers: dict, test_tenant_id: str):
     """REQ-007, REQ-008: Registro de vacantes, deduplicación y anti-SSRF."""
-    headers = {"X-Tenant-ID": test_tenant_id}
+    headers = auth_headers
 
     vacancy_payload = {
         "company_name": "Tech Corp",
@@ -114,12 +115,12 @@ async def test_vacancies_api_and_deduplication(client: AsyncClient, test_tenant_
 
 
 @pytest.mark.asyncio
-async def test_full_api_candidacy_and_approval_cycle(client: AsyncClient, test_tenant_id: str):
+async def test_full_api_candidacy_and_approval_cycle(client: AsyncClient, auth_headers: dict, test_tenant_id: str):
     """
     REQ-010, REQ-014, REQ-015, REQ-017, REQ-026:
     Flujo integral vía API: Evaluar -> Preparar -> Revisar -> Modificar -> Aprobar -> CRM.
     """
-    headers = {"X-Tenant-ID": test_tenant_id}
+    headers = auth_headers
 
     # 1. Asegurar perfil y vacante
     await client.post("/api/v1/profile", json={
@@ -209,23 +210,82 @@ async def test_full_api_candidacy_and_approval_cycle(client: AsyncClient, test_t
 
 @pytest.mark.asyncio
 async def test_api_tenant_isolation(client: AsyncClient):
-    """SEC-002: Aislamiento absoluto por tenant_id a nivel de API."""
-    tenant_a = "tenant-alpha-0001"
-    tenant_b = "tenant-beta-0002"
+    """
+    SEC-001 y SEC-002: Aislamiento absoluto por tenant_id resuelto del lado servidor.
+    Verifica que:
+    - Petición sin credenciales se rechaza con 401.
+    - Usuario Alpha opera en tenant Alpha.
+    - Usuario Beta opera en tenant Beta (aislado, no ve perfil de Alpha).
+    - Usuario Alpha intentando suplantar a tenant Beta mediante X-Tenant-ID se rechaza con 403 Forbidden.
+    """
+    # 0. Petición sin credenciales -> 401 Unauthorized
+    unauth_res = await client.get("/api/v1/profile")
+    assert unauth_res.status_code == 401
 
-    # Crear perfil en tenant A
-    await client.post("/api/v1/profile", json={
+    # 1. Registrar e iniciar sesión Usuario Alpha
+    reg_a = await client.post("/api/v1/auth/register", json={
+        "email": "alpha_user@example.com",
+        "password": "Password123!",
         "full_name": "Usuario Alpha",
-        "email": "alpha@example.com",
+        "tenant_id": "tenant-alpha-0001",
+    })
+    assert reg_a.status_code == 201
+    token_a = reg_a.json()["access_token"]
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+
+    # 2. Registrar e iniciar sesión Usuario Beta
+    reg_b = await client.post("/api/v1/auth/register", json={
+        "email": "beta_user@example.com",
+        "password": "Password123!",
+        "full_name": "Usuario Beta",
+        "tenant_id": "tenant-beta-0002",
+    })
+    assert reg_b.status_code == 201
+    token_b = reg_b.json()["access_token"]
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+
+    # 3. Crear perfil para Usuario Alpha
+    p_res = await client.post("/api/v1/profile", json={
+        "full_name": "Usuario Alpha",
+        "email": "alpha_user@example.com",
         "location_city": "Monterrey",
         "location_country": "México",
-    }, headers={"X-Tenant-ID": tenant_a})
+    }, headers=headers_a)
+    assert p_res.status_code == 200
 
-    # Consultar desde tenant B -> 404 (no existe perfil en tenant B)
-    res_b = await client.get("/api/v1/profile", headers={"X-Tenant-ID": tenant_b})
+    # 4. Usuario Beta consulta su perfil -> 404 (no ve los datos de Alpha)
+    res_b = await client.get("/api/v1/profile", headers=headers_b)
     assert res_b.status_code == 404
 
-    # Consultar desde tenant A -> 200
-    res_a = await client.get("/api/v1/profile", headers={"X-Tenant-ID": tenant_a})
+    # 5. Usuario Alpha consulta su perfil -> 200
+    res_a = await client.get("/api/v1/profile", headers=headers_a)
     assert res_a.status_code == 200
     assert res_a.json()["profile"]["full_name"] == "Usuario Alpha"
+
+    # 6. P1: Intento de Usuario Alpha de usar X-Tenant-ID para acceder al tenant de Beta -> 403 FORBIDDEN
+    spoof_headers = {
+        "Authorization": f"Bearer {token_a}",
+        "X-Tenant-ID": "tenant-beta-0002",
+    }
+    spoof_res = await client.get("/api/v1/profile", headers=spoof_headers)
+    assert spoof_res.status_code == 403
+    assert "no tiene permisos sobre el tenant" in spoof_res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_minimal_ui_served(client: AsyncClient):
+    """
+    REQ-001, REQ-014, REQ-026, REQ-031:
+    Verifica que la interfaz web mínima local se sirve correctamente en / y /app,
+    permitiendo operar perfil, vacantes, aprobaciones y CRM sin tocar código.
+    """
+    for endpoint in ["/", "/app"]:
+        res = await client.get(endpoint)
+        assert res.status_code == 200
+        html = res.text
+        assert "Máquina de Chamba" in html
+        assert "Modo Simulación Activo" in html
+        assert "Perfil y Habilidades" in html
+        assert "Revisión y Aprobaciones" in html
+        assert "Tablero CRM" in html
+

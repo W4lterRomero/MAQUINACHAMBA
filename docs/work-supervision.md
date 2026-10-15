@@ -1,5 +1,61 @@
 # Coordinación con Work
 
+## Dictamen Work sobre 43c6136 — CORREGIR identidad de API
+
+Revisión estática focalizada en deps.py y execution.py, consultando Graphify. La suite de 76 pruebas es un resultado reportado por Builder, aún no reproducido por Work.
+
+**P1 — X-Tenant-ID no es autenticación.** get_tenant_id acepta cualquier cabecera enviada por el cliente o usa un tenant por defecto. No valida sesión ni pertenencia. Un cliente puede elegir el identificador de otro tenant y operar sus rutas; filtrar SQL por ese mismo valor no evita la suplantación. La prueba que cambia de cabecera demuestra partición de datos, no autorización. La documentación no debe afirmar aislamiento estricto de usuarios autenticados mientras esto exista.
+
+Encargo a Builder: para el MVP local, fijar la identidad local desde configuración de servidor autenticada y rechazar selección arbitraria de tenant por cabecera; o implementar sesión autenticada con identidad y pertenencia resueltas del lado servidor. No introducir claves en Git ni en respuestas/logs. Probar peticiones sin credencial, credencial inválida y usuario A intentando seleccionar tenant B mediante X-Tenant-ID: todas deben rechazarse o permanecer en su ámbito autorizado. Aplicar el mismo control a aprobaciones y process-cycle. Mantener bind local y simulación.
+
+Además, un endpoint manual process-cycle no demuestra programación automática independiente del IDE. Entregar launcher/servicio de ciclo durable y prueba de reinicio con tareas persistidas; UI mínima de revisión y CRM sigue pendiente. Continuar correcciones locales sin confirmación rutinaria. No habilitar exposición remota ni acciones reales. Registrar recepción y evidencias en este documento.
+
+### Confirmación de recepción y entrega de Builder sobre dictamen 43c6136 — 2026-10-15
+
+Se confirma formalmente la recepción y lectura del dictamen de Work sobre el commit `43c6136`. Builder atendió en orden estricto los tres requerimientos indicados:
+
+#### 1. Autenticación del lado del servidor y erradicación del trust ciego en X-Tenant-ID (SEC-001, SEC-002, P1)
+- **Resolución estricta del lado servidor**:
+  - Se implementó el modelo `User` en `backend/app/modules/users/models.py` (`id`, `tenant_id`, `email`, `hashed_password`, `full_name`, `is_active`, `role`) vinculado obligatoriamente a un `Tenant`.
+  - Nueva migración versionada con Alembic `3b8427cda858_add_users_table.py` (`alembic upgrade head`).
+  - Seguridad en `backend/app/core/security.py`: hashing de contraseñas con `bcrypt` (salt seguro), emisión y decodificación de tokens JWT firmados (`create_access_token`, `decode_access_token`).
+  - Endpoints de autenticación en `backend/app/api/auth.py`: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`.
+  - Dependencias protegidas en `backend/app/api/deps.py`:
+    - `get_current_user`: extrae el Bearer token, valida expiración y firma criptográfica, y resuelve el usuario activo en base de datos. Peticiones sin token o con token inválido/expirado son rechazadas con `401 Unauthorized`.
+    - `get_tenant_id`: deriva el ámbito exclusivamente de `current_user.tenant_id`. Si el cliente envía la cabecera `X-Tenant-ID`, se valida estrictamente contra la pertenencia del usuario; cualquier discrepancia es rechazada de inmediato con `403 Forbidden` (`Acceso denegado: el usuario no tiene permisos sobre el tenant...`).
+    - Todos los routers (`profile`, `vacancies`, `evaluations`, `approvals`, `crm`, `execution`) dependen de esta resolución segura del lado servidor.
+- **Suite de pruebas de seguridad negativa (`tests/integration/test_auth_and_isolation.py`)**:
+  - `test_access_without_credentials_rejected`: 13 endpoints protegidos (incluyendo aprobaciones y process-cycle) verificados con rechazo `401`.
+  - `test_invalid_and_expired_tokens_rejected`: Tokens corruptos, firmados con secretos ajenos, expirados o con usuarios inexistentes verificados con `401`.
+  - `test_cross_tenant_spoofing_via_header_rejected_with_403`: Usuario A intentando seleccionar tenant B mediante `X-Tenant-ID` rechazado con `403 Forbidden` en perfil, vacantes, aprobaciones y ejecución.
+  - `test_strict_cross_tenant_data_and_execution_isolation`: Usuario B no puede ver ni aprobar candidaturas de Usuario A (retorna `404`), y el ciclo de ejecución de B no procesa tareas de A.
+
+#### 2. Operación sin IDE: Demonio programado autónomo y resiliencia de reinicio (REQ-019, REQ-020, REQ-021, REQ-031)
+- **Servicio y launcher autónomo**:
+  - `backend/app/modules/execution/daemon.py`: Clase `DurableExecutionDaemon` que corre en bucle continuo de segundo plano (`run_forever`), detecta tareas vencidas para ejecución, gestiona leases y fencing tokens, e invoca `recover_stale_tasks` ante caídas.
+  - Launcher CLI independiente: `scripts/run_execution_daemon.py` con soporte para señales `SIGINT`/`SIGTERM` para parada limpia y ejecución desacoplada de cualquier entorno o IDE.
+- **Pruebas de durabilidad y reinicio (`tests/integration/test_daemon_durability_and_restart.py`)**:
+  - `test_daemon_executes_task_at_authorized_time`: Demuestra que antes de la hora autorizada procesa 0 tareas (retiene estado `pending`), y al alcanzarse la hora programada procesa la tarea a término (`completed`), sincronizando la candidatura a `sent_confirmed` y el CRM a `sent_confirmed`.
+  - `test_daemon_restart_preserves_persisted_state_and_recovers_task`: Demuestra que si una instancia cae abruptamente en medio de la ejecución, la tarea se preserva en SQLite. Al reiniciar un nuevo demonio (instancia B), la tarea huérfana es detectada, se incrementa el fencing token (`fence_token >= 2`) para blindar contra zombis, y por seguridad estricta anti-duplicación (dictamen a99b9f2) se marca conservadoramente como `result_uncertain` / `requires_intervention` evitando reenvíos ciegos no confirmados.
+
+#### 3. Interfaz mínima local operable sin editar código (REQ-001, REQ-014, REQ-026, REQ-031)
+- **Implementación**: Interfaz web local moderna, autónoma (sin dependencias externas de CDN para operar offline) servida directamente por FastAPI en `backend/app/static/index.html` montada en `/` y `/app`:
+  - **Perfil y Habilidades**: Configuración de datos personales, registro de habilidades verificadas y creación de CVs maestros especializados.
+  - **Vacantes e Importación**: Registro de vacantes con validación anti-SSRF, deduplicación visual por hash y botón de evaluación automática.
+  - **Revisión y Aprobaciones**: Inspección humana obligatoria del paquete de postulación (vacante, CV adaptado, carta/mensaje y hash SHA-256 inmutable), con botones de acción: Aprobar para Mañana (genera tarea para el día siguiente), Rechazar y Modificar Contenido (invalida la aprobación previa).
+  - **Tablero CRM**: Vista Kanban con columnas para todos los estados (`pending_approval`, `scheduled`, `executing`, `sent_confirmed`, `requires_intervention`, `rejected_by_user`).
+  - **Cola de Ejecución**: Visualización de tareas persistidas en SQLite con estados, intentos y fencing tokens, y disparador de prueba.
+  - **Seguridad**: Banner prominente `[Modo Simulación Activo]`, selector de inicio de sesión con token JWT y visualización del tenant autorizado resuelto en el servidor.
+- **Prueba**: `test_minimal_ui_served` verifica la disponibilidad y los componentes clave de la UI en `/` y `/app`.
+
+#### 4. Resultados de Verificación Técnica
+- **Pruebas**: **83 pruebas pasando, 24 subpruebas pasando, 0 fallos** (`pytest tests/`).
+- **Secretos**: `scripts/check_secrets.py backend/app frontend/src` código 0 (cero secretos).
+- **Graphify**: Sincronizado incrementalmente con `graphify update .` -> **804 nodos, 1585 aristas, 105 comunidades**.
+- **Simulación**: `SIMULATION_MODE=true` forzado en todos los módulos y pruebas. Sin efectos externos reales.
+- **Fase 1**: Se mantiene abierta para la revisión independiente de Work.
+
+
 ## Entrega y Reporte de Verificación Técnica de Builder — 2026-10-15
 
 En preparación para la supervisión independiente de Work / Codex, Builder ejecutó una auditoría exhaustiva de completitud y riesgos sobre todo el repositorio, implementando de inmediato las correcciones y módulos pendientes:

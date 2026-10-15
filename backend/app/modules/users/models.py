@@ -25,3 +25,19 @@ class Tenant(Base):
     simulation_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     execution_window_start: Mapped[time] = mapped_column(Time, nullable=False, default=time(9, 0))
     execution_window_end: Mapped[time] = mapped_column(Time, nullable=False, default=time(18, 0))
+
+
+class User(Base):
+    """
+    Usuario del sistema con pertenencia estricta a un tenant.
+    La identidad y pertenencia son verificadas exclusivamente del lado servidor.
+    """
+
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    role: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
+

@@ -269,3 +269,48 @@ def redact_secrets(text: str) -> str:
     for pattern, replacement in SECRET_PATTERNS:
         result = pattern.sub(replacement, result)
     return result
+
+
+# =============================================================================
+# Autenticación y gestión de tokens (JWT y Bcrypt)
+# =============================================================================
+
+import bcrypt
+from jose import jwt, JWTError
+from backend.app.core.config import get_settings
+
+
+def hash_password(plain_password: str) -> str:
+    """Hashea una contraseña usando bcrypt con salt seguro."""
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(plain_password.encode("utf-8"), salt).decode("utf-8")
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifica si una contraseña en texto plano coincide con el hash almacenado."""
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Genera un JWT firmado con expiración para autenticar solicitudes API."""
+    settings = get_settings()
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    return jwt.encode(to_encode, settings.app_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_access_token(token: str) -> dict:
+    """
+    Decodifica y valida un JWT firmado.
+    Lanza JWTError si el token ha expirado, tiene firma inválida o formato corrupto.
+    """
+    settings = get_settings()
+    return jwt.decode(token, settings.app_secret_key, algorithms=[settings.jwt_algorithm])
+

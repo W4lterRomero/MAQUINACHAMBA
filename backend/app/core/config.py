@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     # === Security ===
     simulation_mode: bool = Field(default=True)
     session_timeout_minutes: int = Field(default=30, ge=5)
+    jwt_algorithm: str = Field(default="HS256")
+    access_token_expire_minutes: int = Field(default=60, ge=1)
 
     model_config = {
         "env_file": ".env",

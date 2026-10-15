@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Máquina de Chamba 🔧 — Panel de Control Local</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #10b981;
+      --success-hover: #059669;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --tag-bg: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+    
+    header { background-color: var(--card-bg); border-bottom: 1px solid var(--card-border); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+    .brand { display: flex; align-items: center; gap: 0.75rem; font-size: 1.25rem; font-weight: 700; color: #60a5fa; }
+    .sim-badge { background-color: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid #f59e0b; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .user-info { display: flex; align-items: center; gap: 1rem; font-size: 0.875rem; color: var(--text-muted); }
+    .user-info strong { color: var(--text); }
+    
+    nav { background-color: #131c2e; border-bottom: 1px solid var(--card-border); display: flex; padding: 0 2rem; gap: 0.5rem; }
+    nav button { background: none; border: none; color: var(--text-muted); padding: 0.75rem 1.25rem; font-size: 0.95rem; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    nav button:hover { color: var(--text); }
+    nav button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+    main { flex: 1; padding: 2rem; max-width: 1400px; margin: 0 auto; width: 100%; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.5rem; }
+    .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.75rem; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2); }
+    .card h2 { font-size: 1.15rem; font-weight: 600; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; }
+    
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); margin-bottom: 0.35rem; }
+    input, select, textarea { width: 100%; background: #0f172a; border: 1px solid var(--card-border); border-radius: 0.375rem; color: var(--text); padding: 0.6rem 0.75rem; font-size: 0.9rem; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); ring: 2px rgba(59, 130, 246, 0.2); }
+    textarea { resize: vertical; min-height: 80px; }
+
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.6rem 1.25rem; font-size: 0.9rem; font-weight: 600; border-radius: 0.375rem; cursor: pointer; border: none; transition: background 0.2s; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-success { background: var(--success); color: white; }
+    .btn-success:hover { background: var(--success-hover); }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn-danger:hover { background: var(--danger-hover); }
+    .btn-outline { background: transparent; border: 1px solid var(--card-border); color: var(--text); }
+    .btn-outline:hover { background: #334155; }
+    .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+
+    .kanban-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; overflow-x: auto; }
+    .kanban-col { background: #131c2e; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1rem; min-height: 400px; display: flex; flex-direction: column; }
+    .kanban-col-header { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 1rem; display: flex; justify-content: space-between; }
+    .kanban-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.375rem; padding: 1rem; margin-bottom: 0.75rem; cursor: pointer; transition: transform 0.15s, border-color 0.15s; }
+    .kanban-card:hover { transform: translateY(-2px); border-color: var(--primary); }
+    .kanban-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .kanban-card p { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }
+    .badge-pending { background: #854d0e; color: #fef08a; }
+    .badge-scheduled { background: #1e3a8a; color: #bfdbfe; }
+    .badge-confirmed { background: #064e3b; color: #a7f3d0; }
+    .badge-danger { background: #7f1d1d; color: #fecaca; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid var(--card-border); }
+    th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; background: #131c2e; }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+    .hash-tag { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 0.25rem; border: 1px solid var(--card-border); color: #93c5fd; }
+    .toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: #1e293b; border: 1px solid var(--primary); color: white; padding: 0.75rem 1.25rem; border-radius: 0.375rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 100; font-size: 0.9rem; display: none; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); display: flex; align-items: center; justify-content: center; z-index: 50; }
+    .modal { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.75rem; width: 95%; max-width: 600px; max-height: 90vh; overflow-y: auto; padding: 1.75rem; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <span>Máquina de Chamba 🔧</span>
+      <span class="sim-badge" id="simBadge">Modo Simulación Activo</span>
+    </div>
+    <div class="user-info">
+      <span>Tenant: <strong id="lblTenant">No conectado</strong></span>
+      <span>Usuario: <strong id="lblUser">Invitado</strong></span>
+      <button class="btn btn-outline btn-sm" id="btnAuthToggle" onclick="toggleAuthModal()">Iniciar Sesión</button>
+    </div>
+  </header>
+
+  <nav>
+    <button class="active" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
+    <button onclick="switchTab('tab-vacancies')">Vacantes e Importación</button>
+    <button onclick="switchTab('tab-approvals')">Revisión y Aprobaciones</button>
+    <button onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
+    <button onclick="switchTab('tab-execution')">Cola de Ejecución</button>
+  </nav>
+
+  <main>
+    <!-- TAB 1: PERFIL -->
+    <section id="tab-profile" class="tab-content active">
+      <div class="grid">
+        <div class="card">
+          <h2>Configuración de Perfil Profesional</h2>
+          <form id="frmProfile" onsubmit="saveProfile(event)">
+            <div class="form-group">
+              <label>Nombre Completo</label>
+              <input type="text" id="profName" required placeholder="Ej. Ana Desarrolladora">
+            </div>
+            <div class="form-group">
+              <label>Correo Electrónico</label>
+              <input type="email" id="profEmail" required placeholder="ana@ejemplo.com">
+            </div>
+            <div class="form-group">
+              <label>Teléfono</label>
+              <input type="text" id="profPhone" placeholder="+52 55 1234 5678">
+            </div>
+            <div style="display: flex; gap: 1rem;">
+              <div class="form-group" style="flex: 1;">
+                <label>Ciudad</label>
+                <input type="text" id="profCity" required placeholder="Ciudad de México">
+              </div>
+              <div class="form-group" style="flex: 1;">
+                <label>País</label>
+                <input type="text" id="profCountry" required placeholder="México">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Disponibilidad</label>
+              <select id="profAvailability">
+                <option value="immediate">Inmediata</option>
+                <option value="2_weeks">2 semanas</option>
+                <option value="1_month">1 mes</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Guardar Perfil</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Habilidades Verificadas (Skills)</h2>
+          <form id="frmSkill" onsubmit="addSkill(event)" style="margin-bottom: 1.5rem;">
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+              <input type="text" id="skillName" required placeholder="Habilidad (ej. Python)" style="flex: 2;">
+              <select id="skillCategory" style="flex: 1;">
+                <option value="technical">Técnica</option>
+                <option value="soft">Blanda</option>
+                <option value="tool">Herramienta</option>
+              </select>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <select id="skillLevel" style="flex: 1;">
+                <option value="intermediate">Intermedio</option>
+                <option value="advanced">Avanzado</option>
+                <option value="expert">Experto</option>
+              </select>
+              <input type="number" id="skillYears" placeholder="Años" step="0.5" style="width: 80px;" value="3.0">
+              <button type="submit" class="btn btn-outline">Agregar</button>
+            </div>
+          </form>
+          <div id="skillsList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+            <span style="color: var(--text-muted); font-size: 0.85rem;">No hay habilidades registradas.</span>
+          </div>
+
+          <h2 style="margin-top: 2rem;">CVs Maestros Especializados</h2>
+          <form id="frmCV" onsubmit="createMasterCV(event)" style="margin-bottom: 1rem;">
+            <div class="form-group">
+              <input type="text" id="cvName" required placeholder="Nombre (ej. CV Backend Python)">
+            </div>
+            <div class="form-group">
+              <input type="text" id="cvSpecialization" required placeholder="Especialización (ej. Backend Developer)">
+            </div>
+            <button type="submit" class="btn btn-outline btn-sm">Crear CV Maestro</button>
+          </form>
+          <div id="cvsList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: VACANTES -->
+    <section id="tab-vacancies" class="tab-content">
+      <div class="grid">
+        <div class="card" style="max-width: 450px;">
+          <h2>Importar Vacante de Empleo</h2>
+          <form id="frmVacancy" onsubmit="importVacancy(event)">
+            <div class="form-group">
+              <label>Empresa</label>
+              <input type="text" id="vacCompany" required placeholder="Tech Corp">
+            </div>
+            <div class="form-group">
+              <label>Título del Puesto</label>
+              <input type="text" id="vacTitle" required placeholder="Senior Backend Engineer">
+            </div>
+            <div class="form-group">
+              <label>URL Original (Protegida anti-SSRF)</label>
+              <input type="url" id="vacUrl" required placeholder="https://careers.techcorp.com/job/42">
+            </div>
+            <div class="form-group">
+              <label>Requisitos (separados por coma)</label>
+              <input type="text" id="vacReqs" placeholder="Python, FastAPI, SQL, Docker">
+            </div>
+            <div class="form-group">
+              <label>Descripción</label>
+              <textarea id="vacDesc" placeholder="Detalles de la posición..."></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Registrar Vacante</button>
+          </form>
+        </div>
+
+        <div class="card" style="flex: 2;">
+          <h2>Vacantes Registradas</h2>
+          <table id="tblVacancies">
+            <thead>
+              <tr>
+                <th>Puesto / Empresa</th>
+                <th>URL Origen</th>
+                <th>Requisitos</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Sin vacantes importadas.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: APROBACIONES -->
+    <section id="tab-approvals" class="tab-content">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <h2>Revisión Humana Obligatoria (Aprobar hoy, ejecutar mañana)</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+          Conforme a las reglas del sistema, cada postulación requiere la inspección humana de la vacante, el CV adaptado y la carta antes de autorizarse. Toda aprobación genera una huella SHA-256 inmutable y programa la ejecución para el día siguiente.
+        </p>
+        <div id="candidacyReviewContainer">
+          <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
+            Selecciona una vacante en la pestaña anterior y haz clic en "Evaluar y Preparar" para iniciar la revisión.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: CRM -->
+    <section id="tab-crm" class="tab-content">
+      <div class="card">
+        <h2>Tablero CRM de Candidaturas</h2>
+        <div class="kanban-board">
+          <div class="kanban-col">
+            <div class="kanban-col-header">
+              <span>Pendiente Aprobación</span>
+              <span id="cnt-pending_approval">0</span>
+            </div>
+            <div id="col-pending_approval"></div>
+          </div>
+          <div class="kanban-col">
+            <div class="kanban-col-header">
+              <span>Programadas (Mañana)</span>
+              <span id="cnt-scheduled">0</span>
+            </div>
+            <div id="col-scheduled"></div>
+          </div>
+          <div class="kanban-col">
+            <div class="kanban-col-header">
+              <span>En Ejecución</span>
+              <span id="cnt-executing">0</span>
+            </div>
+            <div id="col-executing"></div>
+          </div>
+          <div class="kanban-col">
+            <div class="kanban-col-header">
+              <span>Enviadas Confirmadas</span>
+              <span id="cnt-sent_confirmed">0</span>
+            </div>
+            <div id="col-sent_confirmed"></div>
+          </div>
+          <div class="kanban-col">
+            <div class="kanban-col-header">
+              <span>Requiere Intervención</span>
+              <span id="cnt-requires_intervention">0</span>
+            </div>
+            <div id="col-requires_intervention"></div>
+          </div>
+          <div class="kanban-col">
+            <div class="kanban-col-header">
+              <span>Rechazadas</span>
+              <span id="cnt-rejected_by_user">0</span>
+            </div>
+            <div id="col-rejected_by_user"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: EJECUCIÓN -->
+    <section id="tab-execution" class="tab-content">
+      <div class="card">
+        <h2>Cola de Tareas Programadas Durables (Operación sin IDE)</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <p style="font-size: 0.875rem; color: var(--text-muted);">
+            Las tareas persisten en SQLite y se procesan automáticamente por el launcher en segundo plano (<code>scripts/run_execution_daemon.py</code>).
+          </p>
+          <button class="btn btn-outline btn-sm" onclick="triggerProcessCycle()">Ejecutar Ciclo Manual</button>
+        </div>
+        <table id="tblTasks">
+          <thead>
+            <tr>
+              <th>ID Tarea</th>
+              <th>Fecha Programada</th>
+              <th>Instante UTC</th>
+              <th>Estado</th>
+              <th>Intentos</th>
+              <th>Fencing Token</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Sin tareas programadas.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL DE AUTENTICACIÓN -->
+  <div id="modalAuth" class="modal-backdrop" style="display: none;">
+    <div class="modal">
+      <h2 style="margin-bottom: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;" id="modalAuthTitle">Iniciar Sesión</h2>
+      <form onsubmit="handleAuthSubmit(event)">
+        <div class="form-group">
+          <label>Correo Electrónico</label>
+          <input type="email" id="authEmail" required value="demo@maquinachamba.local">
+        </div>
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" id="authPassword" required value="Password123!">
+        </div>
+        <div class="form-group" id="grpFullName" style="display: none;">
+          <label>Nombre Completo</label>
+          <input type="text" id="authFullName" placeholder="Tu Nombre">
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem;">
+          <a href="#" onclick="toggleAuthMode(event)" style="color: var(--primary); font-size: 0.85rem;" id="lnkToggleAuthMode">¿No tienes cuenta? Regístrate</a>
+          <div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="toggleAuthModal()">Cancelar</button>
+            <button type="submit" class="btn btn-primary btn-sm" id="btnAuthSubmit">Ingresar</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast">Mensaje</div>
+
+  <script>
+    let authToken = localStorage.getItem("mc_token") || "";
+    let currentUser = null;
+    let isRegisterMode = false;
+    let activeCandidacies = [];
+
+    async function apiRequest(url, options = {}) {
+      const headers = options.headers || {};
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`;
+      }
+      headers["Content-Type"] = "application/json";
+      options.headers = headers;
+
+      try {
+        const res = await fetch(url, options);
+        if (res.status === 401) {
+          showToast("Sesión no iniciada o expirada. Por favor identifícate.");
+          toggleAuthModal(true);
+          return null;
+        }
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(errData.detail || `Error ${res.status}`);
+        }
+        return await res.json();
+      } catch (err) {
+        showToast(err.message, true);
+        throw err;
+      }
+    }
+
+    function showToast(msg, isError = false) {
+      const t = document.getElementById("toast");
+      t.innerText = msg;
+      t.style.borderColor = isError ? "var(--danger)" : "var(--primary)";
+      t.style.display = "block";
+      setTimeout(() => { t.style.display = "none"; }, 4000);
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+      event.target.classList.add("active");
+      document.getElementById(tabId).classList.add("active");
+
+      if (tabId === "tab-crm") loadCRM();
+      if (tabId === "tab-vacancies") loadVacancies();
+      if (tabId === "tab-execution") loadTasks();
+    }
+
+    function toggleAuthModal(show = null) {
+      const m = document.getElementById("modalAuth");
+      if (show !== null) {
+        m.style.display = show ? "flex" : "none";
+      } else {
+        m.style.display = m.style.display === "none" ? "flex" : "none";
+      }
+    }
+
+    function toggleAuthMode(e) {
+      e.preventDefault();
+      isRegisterMode = !isRegisterMode;
+      document.getElementById("modalAuthTitle").innerText = isRegisterMode ? "Crear Nueva Cuenta Local" : "Iniciar Sesión";
+      document.getElementById("grpFullName").style.display = isRegisterMode ? "block" : "none";
+      document.getElementById("btnAuthSubmit").innerText = isRegisterMode ? "Registrar" : "Ingresar";
+      document.getElementById("lnkToggleAuthMode").innerText = isRegisterMode ? "¿Ya tienes cuenta? Inicia sesión" : "¿No tienes cuenta? Regístrate";
+    }
+
+    async function handleAuthSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById("authEmail").value;
+      const password = document.getElementById("authPassword").value;
+      const fullName = document.getElementById("authFullName").value;
+
+      try {
+        const endpoint = isRegisterMode ? "/api/v1/auth/register" : "/api/v1/auth/login";
+        const payload = isRegisterMode ? { email, password, full_name: fullName } : { email, password };
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Error en autenticación");
+
+        authToken = data.access_token;
+        localStorage.setItem("mc_token", authToken);
+        toggleAuthModal(false);
+        showToast("Sesión autorizada correctamente");
+        await checkAuthStatus();
+        loadInitialData();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    async function checkAuthStatus() {
+      if (!authToken) {
+        document.getElementById("lblTenant").innerText = "Sin sesión";
+        document.getElementById("lblUser").innerText = "Invitado";
+        document.getElementById("btnAuthToggle").innerText = "Iniciar Sesión";
+        return;
+      }
+      try {
+        const me = await apiRequest("/api/v1/auth/me");
+        if (me) {
+          currentUser = me;
+          document.getElementById("lblTenant").innerText = me.tenant_id;
+          document.getElementById("lblUser").innerText = me.email;
+          document.getElementById("btnAuthToggle").innerText = "Cerrar Sesión";
+          document.getElementById("btnAuthToggle").onclick = () => {
+            authToken = "";
+            localStorage.removeItem("mc_token");
+            checkAuthStatus();
+          };
+        }
+      } catch (e) {
+        authToken = "";
+        localStorage.removeItem("mc_token");
+      }
+    }
+
+    async function saveProfile(e) {
+      e.preventDefault();
+      const payload = {
+        full_name: document.getElementById("profName").value,
+        email: document.getElementById("profEmail").value,
+        phone: document.getElementById("profPhone").value,
+        location_city: document.getElementById("profCity").value,
+        location_country: document.getElementById("profCountry").value,
+        availability: document.getElementById("profAvailability").value,
+      };
+      await apiRequest("/api/v1/profile", { method: "POST", body: JSON.stringify(payload) });
+      showToast("Perfil guardado con éxito.");
+    }
+
+    async function addSkill(e) {
+      e.preventDefault();
+      const payload = {
+        name: document.getElementById("skillName").value,
+        category: document.getElementById("skillCategory").value,
+        proficiency: document.getElementById("skillLevel").value,
+        years_experience: parseFloat(document.getElementById("skillYears").value) || 1.0,
+        verification_status: "verified",
+      };
+      await apiRequest("/api/v1/profile/skills", { method: "POST", body: JSON.stringify(payload) });
+      document.getElementById("skillName").value = "";
+      showToast("Habilidad registrada.");
+      loadProfileData();
+    }
+
+    async function createMasterCV(e) {
+      e.preventDefault();
+      const payload = {
+        name: document.getElementById("cvName").value,
+        specialization: document.getElementById("cvSpecialization").value,
+        summary: `Especialista en ${document.getElementById("cvSpecialization").value}`,
+      };
+      await apiRequest("/api/v1/profile/cv", { method: "POST", body: JSON.stringify(payload) });
+      document.getElementById("cvName").value = "";
+      document.getElementById("cvSpecialization").value = "";
+      showToast("CV Maestro creado.");
+      loadProfileData();
+    }
+
+    async function loadProfileData() {
+      if (!authToken) return;
+      try {
+        const data = await apiRequest("/api/v1/profile");
+        if (data && data.profile) {
+          document.getElementById("profName").value = data.profile.full_name || "";
+          document.getElementById("profEmail").value = data.profile.email || "";
+          document.getElementById("profPhone").value = data.profile.phone || "";
+          document.getElementById("profCity").value = data.profile.location_city || "";
+          document.getElementById("profCountry").value = data.profile.location_country || "";
+          document.getElementById("profAvailability").value = data.profile.availability || "immediate";
+        }
+        if (data && data.skills) {
+          const sList = document.getElementById("skillsList");
+          sList.innerHTML = data.skills.map(s => `
+            <span class="hash-tag" style="padding: 0.35rem 0.6rem;">${s.name} (${s.proficiency}) - ${s.years_experience}a</span>
+          `).join("") || '<span style="color: var(--text-muted);">Sin habilidades.</span>';
+        }
+        if (data && data.master_cvs) {
+          const cvList = document.getElementById("cvsList");
+          cvList.innerHTML = data.master_cvs.map(c => `
+            <div style="background: #0f172a; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 0.5rem; border: 1px solid var(--card-border);">
+              <strong>${c.name}</strong> - <span style="color: var(--text-muted);">${c.specialization}</span>
+            </div>
+          `).join("");
+        }
+      } catch (e) {}
+    }
+
+    async function importVacancy(e) {
+      e.preventDefault();
+      const reqs = document.getElementById("vacReqs").value.split(",").map(r => r.trim()).filter(Boolean);
+      const payload = {
+        company_name: document.getElementById("vacCompany").value,
+        job_title: document.getElementById("vacTitle").value,
+        source_url: document.getElementById("vacUrl").value,
+        requirements: reqs,
+        description: document.getElementById("vacDesc").value,
+      };
+      const res = await apiRequest("/api/v1/vacancies", { method: "POST", body: JSON.stringify(payload) });
+      if (res) {
+        showToast(res.status === "already_exists" ? "Vacante ya existía (deduplicada por hash)." : "Vacante importada con éxito.");
+        loadVacancies();
+      }
+    }
+
+    async function loadVacancies() {
+      if (!authToken) return;
+      const vacancies = await apiRequest("/api/v1/vacancies");
+      const tb = document.querySelector("#tblVacancies tbody");
+      if (!vacancies || vacancies.length === 0) {
+        tb.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Sin vacantes registradas.</td></tr>';
+        return;
+      }
+      tb.innerHTML = vacancies.map(v => `
+        <tr>
+          <td><strong>${v.job_title}</strong><br><span style="color: var(--text-muted);">${v.company_name}</span></td>
+          <td><a href="${v.source_url}" target="_blank" style="color: var(--primary); font-size: 0.8rem;">${v.source_url.substring(0, 35)}...</a></td>
+          <td>${(v.requirements || []).join(", ") || "-"}</td>
+          <td>
+            <button class="btn btn-outline btn-sm" onclick="evaluateAndPrepare('${v.id}')">Evaluar y Revisar</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function evaluateAndPrepare(vacancyId) {
+      try {
+        const prof = await apiRequest("/api/v1/profile");
+        if (!prof.master_cvs || prof.master_cvs.length === 0) {
+          showToast("Debes crear al menos un CV Maestro en Perfil.", true);
+          return;
+        }
+        const cvId = prof.master_cvs[0].id;
+        showToast("Evaluando compatibilidad...");
+        const evalRes = await apiRequest("/api/v1/evaluations", {
+          method: "POST",
+          body: JSON.stringify({ vacancy_id: vacancyId, cv_id: cvId })
+        });
+        
+        showToast("Preparando paquete de postulación...");
+        const cand = await apiRequest("/api/v1/candidacies/prepare", {
+          method: "POST",
+          body: JSON.stringify({ vacancy_id: vacancyId, cv_id: cvId, evaluation_id: evalRes.id })
+        });
+
+        // Cargar vista de revisión
+        inspectCandidacy(cand.id);
+        switchTab('tab-approvals');
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    async function inspectCandidacy(candidacyId) {
+      const data = await apiRequest(`/api/v1/candidacies/${candidacyId}`);
+      if (!data) return;
+      const c = data.candidacy;
+      const cont = document.getElementById("candidacyReviewContainer");
+      cont.innerHTML = `
+        <div style="background: #131c2e; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3>Candidatura #${c.id.substring(0, 8)} - Estado: <span class="badge badge-pending">${c.status}</span></h3>
+            <div>Hash Inmutable: <span class="hash-tag">${c.content_hash.substring(0, 16)}...</span></div>
+          </div>
+          <div class="grid" style="margin-bottom: 1.5rem;">
+            <div>
+              <label>Carta de Presentación / Mensaje</label>
+              <textarea id="txtCoverLetter" style="height: 140px;">${c.cover_letter || ""}</textarea>
+              <button class="btn btn-outline btn-sm" style="margin-top: 0.5rem;" onclick="modifyCoverLetter('${c.id}')">Actualizar Contenido (Invalida aprobación)</button>
+            </div>
+            <div>
+              <label>Resumen de CV Adaptado</label>
+              <pre style="background: #0f172a; padding: 1rem; border-radius: 0.375rem; border: 1px solid var(--card-border); font-size: 0.8rem; overflow: auto; height: 140px;">${JSON.stringify(c.adapted_cv_snapshot, null, 2)}</pre>
+            </div>
+          </div>
+          <div style="display: flex; gap: 1rem; justify-content: flex-end; border-top: 1px solid var(--card-border); padding-top: 1rem;">
+            <button class="btn btn-danger btn-sm" onclick="rejectCandidacy('${c.id}')">Rechazar Definitivamente</button>
+            <button class="btn btn-success" onclick="approveCandidacy('${c.id}')">Aprobar para Mañana 🚀</button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function approveCandidacy(id) {
+      try {
+        const res = await apiRequest(`/api/v1/candidacies/${id}/approve`, {
+          method: "POST",
+          body: JSON.stringify({ user_timezone: "America/Mexico_City", notes: "Aprobado desde interfaz mínima local" })
+        });
+        showToast("¡Candidatura aprobada! Programada para mañana a las 09:00.");
+        inspectCandidacy(id);
+      } catch (e) {}
+    }
+
+    async function rejectCandidacy(id) {
+      if (!confirm("¿Deseas rechazar definitivamente esta candidatura?")) return;
+      try {
+        await apiRequest(`/api/v1/candidacies/${id}/reject`, {
+          method: "POST",
+          body: JSON.stringify({ reason: "Rechazado manualmente por el usuario" })
+        });
+        showToast("Candidatura rechazada.");
+        inspectCandidacy(id);
+      } catch (e) {}
+    }
+
+    async function modifyCoverLetter(id) {
+      const newLetter = document.getElementById("txtCoverLetter").value;
+      try {
+        await apiRequest(`/api/v1/candidacies/${id}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ new_cover_letter: newLetter })
+        });
+        showToast("Contenido modificado. Aprobación previa invalidada.");
+        inspectCandidacy(id);
+      } catch (e) {}
+    }
+
+    async function loadCRM() {
+      if (!authToken) return;
+      const entries = await apiRequest("/api/v1/crm/entries");
+      const cols = ["pending_approval", "scheduled", "executing", "sent_confirmed", "requires_intervention", "rejected_by_user"];
+      cols.forEach(c => {
+        document.getElementById(`col-${c}`).innerHTML = "";
+        document.getElementById(`cnt-${c}`).innerText = "0";
+      });
+
+      if (!entries) return;
+      entries.forEach(e => {
+        const colId = cols.includes(e.current_status) ? e.current_status : "requires_intervention";
+        const container = document.getElementById(`col-${colId}`);
+        const cnt = document.getElementById(`cnt-${colId}`);
+        cnt.innerText = parseInt(cnt.innerText) + 1;
+
+        const card = document.createElement("div");
+        card.className = "kanban-card";
+        card.onclick = () => { inspectCandidacy(e.candidacy_id); switchTab('tab-approvals'); };
+        card.innerHTML = `
+          <h3>${e.job_title}</h3>
+          <p>${e.company_name}</p>
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem;">
+            <span class="badge badge-pending">${e.current_status}</span>
+            <span style="color: var(--text-muted);">${new Date(e.updated_at).toLocaleDateString()}</span>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    async function loadTasks() {
+      if (!authToken) return;
+      const tasks = await apiRequest("/api/v1/execution/tasks");
+      const tb = document.querySelector("#tblTasks tbody");
+      if (!tasks || tasks.length === 0) {
+        tb.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Sin tareas programadas.</td></tr>';
+        return;
+      }
+      tb.innerHTML = tasks.map(t => `
+        <tr>
+          <td><span class="hash-tag">${t.id.substring(0, 8)}...</span></td>
+          <td>${t.scheduled_date} ${t.scheduled_time || ""}</td>
+          <td>${t.execution_instant_utc}</td>
+          <td><span class="badge ${t.status === 'completed' ? 'badge-confirmed' : 'badge-pending'}">${t.status}</span></td>
+          <td>${t.attempts}</td>
+          <td>${t.fence_token}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function triggerProcessCycle() {
+      try {
+        const res = await apiRequest("/api/v1/execution/process-cycle", { method: "POST" });
+        showToast(`Ciclo ejecutado: ${res.processed_tasks.length} tareas procesadas, ${res.recovered_tasks.length} recuperadas.`);
+        loadTasks();
+      } catch (e) {}
+    }
+
+    async function loadInitialData() {
+      await loadProfileData();
+      await loadVacancies();
+      await loadCRM();
+      await loadTasks();
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      await checkAuthStatus();
+      if (authToken) {
+        loadInitialData();
+      } else {
+        toggleAuthModal(true);
+      }
+    });
+  </script>
+</body>
+</html>

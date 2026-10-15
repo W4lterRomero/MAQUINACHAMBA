@@ -6,6 +6,8 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+
 
 import uvicorn
 from fastapi import FastAPI
@@ -83,7 +85,20 @@ def create_app() -> FastAPI:
     from backend.app.api import api_router
     app.include_router(api_router, prefix="/api/v1")
 
+    # Servir interfaz web mínima local (REQ-001, REQ-014, REQ-026, REQ-031)
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        from fastapi.staticfiles import StaticFiles
+        from fastapi.responses import FileResponse
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+        @app.get("/", response_class=FileResponse)
+        @app.get("/app", response_class=FileResponse)
+        async def serve_ui():
+            return FileResponse(str(static_dir / "index.html"))
+
     return app
+
 
 
 app = create_app()

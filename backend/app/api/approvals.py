@@ -228,6 +228,8 @@ async def approve_candidacy(
             "idempotency_key": task.idempotency_key,
         }
     except ValueError as exc:
+        if "no encontrada" in str(exc).lower():
+            raise HTTPException(status_code=404, detail=str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
 
 
@@ -257,6 +259,8 @@ async def reject_candidacy(
             "notes": approval.notes,
         }
     except ValueError as exc:
+        if "no encontrada" in str(exc).lower():
+            raise HTTPException(status_code=404, detail=str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
 
 
@@ -288,4 +292,7 @@ async def modify_candidacy(
             "message": "Aprobación previa invalidada. La candidatura requiere nueva revisión humana.",
         }
     except ValueError as exc:
+        if "no encontrada" in str(exc).lower():
+            raise HTTPException(status_code=404, detail=str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
+
