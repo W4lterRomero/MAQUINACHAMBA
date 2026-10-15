@@ -178,6 +178,7 @@ class ApprovalService:
             tenant_id=tenant_id,
             candidacy_id=candidacy.id,
             scheduled_date=scheduled_date,
+            version=candidacy.version,
         )
 
         task = ScheduledTask(
@@ -198,7 +199,12 @@ class ApprovalService:
         # 5. Actualizar candidatura y CRM
         candidacy.status = "scheduled"
 
-        crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == candidacy.id))
+        crm_res = await session.execute(
+            select(CRMEntry).where(
+                CRMEntry.candidacy_id == candidacy.id,
+                CRMEntry.tenant_id == tenant_id,
+            )
+        )
         crm = crm_res.scalar_one_or_none()
         if crm:
             old_st = crm.current_status
@@ -257,13 +263,19 @@ class ApprovalService:
         tasks_res = await session.execute(
             select(ScheduledTask).where(
                 ScheduledTask.candidacy_id == candidacy.id,
+                ScheduledTask.tenant_id == tenant_id,
                 ScheduledTask.status == "pending",
             )
         )
         for t in tasks_res.scalars():
             t.status = "cancelled"
 
-        crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == candidacy.id))
+        crm_res = await session.execute(
+            select(CRMEntry).where(
+                CRMEntry.candidacy_id == candidacy.id,
+                CRMEntry.tenant_id == tenant_id,
+            )
+        )
         crm = crm_res.scalar_one_or_none()
         if crm:
             old_st = crm.current_status
@@ -306,6 +318,7 @@ class ApprovalService:
         approvals_res = await session.execute(
             select(Approval).where(
                 Approval.candidacy_id == candidacy.id,
+                Approval.tenant_id == tenant_id,
                 Approval.decision == "approved",
                 Approval.invalidated_at.is_(None),
             )
@@ -318,6 +331,7 @@ class ApprovalService:
         tasks_res = await session.execute(
             select(ScheduledTask).where(
                 ScheduledTask.candidacy_id == candidacy.id,
+                ScheduledTask.tenant_id == tenant_id,
                 ScheduledTask.status == "pending",
             )
         )
@@ -333,7 +347,12 @@ class ApprovalService:
         candidacy.version += 1
         candidacy.status = "pending_approval"
 
-        crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == candidacy.id))
+        crm_res = await session.execute(
+            select(CRMEntry).where(
+                CRMEntry.candidacy_id == candidacy.id,
+                CRMEntry.tenant_id == tenant_id,
+            )
+        )
         crm = crm_res.scalar_one_or_none()
         if crm:
             old_st = crm.current_status

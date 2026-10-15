@@ -11,37 +11,37 @@
 
 | ID | Requisito | Decisión | Fase | Prioridad | Estado | Prueba |
 |----|-----------|----------|:----:|:---------:|:------:|--------|
-| REQ-001 | Perfil profesional configurable sin editar código | D7, D12 | 1 | P1 | ✅ | `test_phase1_mvp_vertical.py` (UserProfile) |
+| REQ-001 | Perfil profesional configurable sin editar código | D7, D12 | 1 | P1 | ✅ | `api/profile.py`, `test_api_v1_endpoints.py::test_profile_and_cv_api_flow` |
 | REQ-002 | Importar CV en PDF/DOCX con revisión humana | D12 | 2 | P1 | ⬜ | T-002 |
 | REQ-003 | Importar GitHub con autorización y permisos mínimos | D12 | 2 | P1 | ⬜ | T-003 |
-| REQ-004 | Varios CV maestros especializados | D9 | 2 | P1 | ✅ | `cv/models.py`, `test_phase1_mvp_vertical.py` |
+| REQ-004 | Varios CV maestros especializados | D9 | 2 | P1 | ✅ | `api/profile.py`, `cv/models.py`, `test_api_v1_endpoints.py` |
 | REQ-005 | Consistencia entre CV maestros y perfil | D9 | 2 | P1 | ⬜ | T-005 |
 | REQ-006 | Perfil de comunicación con cuestionario | D10 | 2 | P1 | ⬜ | T-006 |
-| REQ-007 | Descubrir e importar vacantes | D5 | 1 | P1 | ✅ | `vacancies/models.py`, `test_phase1_mvp_vertical.py` |
-| REQ-008 | Deduplicación de vacantes | D5 | 1 | P1 | ✅ | `Vacancy.dedup_hash` |
+| REQ-007 | Descubrir e importar vacantes | D5 | 1 | P1 | ✅ | `api/vacancies.py`, `test_api_v1_endpoints.py` |
+| REQ-008 | Deduplicación de vacantes | D5 | 1 | P1 | ✅ | `api/vacancies.py`, `test_api_v1_endpoints.py` |
 | REQ-009 | Detección de vacantes cerradas y fraude | D5 | 1 | P2 | ⬜ | T-009 |
-| REQ-010 | Evaluar compatibilidad con justificación | D5 | 1 | P1 | ✅ | `evaluation/service.py`, `test_phase1_mvp_vertical.py` |
-| REQ-011 | Reglas deterministas antes de IA | D14 | 1 | P1 | ✅ | `evaluation/service.py` |
+| REQ-010 | Evaluar compatibilidad con justificación | D5 | 1 | P1 | ✅ | `api/evaluations.py`, `test_api_v1_endpoints.py` |
+| REQ-011 | Reglas deterministas antes de IA | D14 | 1 | P1 | ✅ | `evaluation/service.py`, `api/evaluations.py` |
 | REQ-012 | Adaptar CV sin inventar hechos | D9,D12 | 2 | P1 | ⬜ | T-012 |
 | REQ-013 | Generar documentos PDF/DOCX | D9 | 2 | P1 | ⬜ | T-013 |
-| REQ-014 | Revisar vacante, CV y mensaje antes de aprobar | D11 | 1 | P0 | ✅ | `approvals/service.py::prepare_candidacy` |
-| REQ-015 | Aprobar hoy, ejecutar mañana | D3 | 1 | P0 | ✅ | `scheduling/service.py`, `test_phase1_mvp_vertical.py` |
-| REQ-016 | Sin envíos durante preparación | D3 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_full_vertical_happy_path` |
-| REQ-017 | Edición invalida aprobación | D11 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_modification_invalidates_approval` |
-| REQ-018 | Rechazo/cancelación impide envío | D3 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_rejection_blocks_execution` |
-| REQ-019 | Reinicio sin pérdida de tareas | D3 | 1 | P0 | ✅ | Cola durable en base de datos (`ScheduledTask`) |
-| REQ-020 | Workers no duplican ejecución | D3 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_two_workers_do_not_execute_concurrently` |
-| REQ-021 | Recuperación tras caída | D3 | 1 | P0 | 🔨 | En diseño para workers persistentes |
-| REQ-022 | Resultado incierto distinguido | D3 | 1 | P0 | 🔨 | En diseño de adaptador de portal |
+| REQ-014 | Revisar vacante, CV y mensaje antes de aprobar | D11 | 1 | P0 | ✅ | `api/approvals.py::get_candidacy_for_review`, `test_api_v1_endpoints.py` |
+| REQ-015 | Aprobar hoy, ejecutar mañana | D3 | 1 | P0 | ✅ | `api/approvals.py::approve_candidacy`, `scheduling/service.py` |
+| REQ-016 | Sin envíos durante preparación | D3 | 1 | P0 | ✅ | `api/approvals.py::prepare_candidacy`, `test_api_v1_endpoints.py` |
+| REQ-017 | Edición invalida aprobación | D11 | 1 | P0 | ✅ | `api/approvals.py::modify_candidacy`, `test_api_v1_endpoints.py` |
+| REQ-018 | Rechazo/cancelación impide envío | D3 | 1 | P0 | ✅ | `api/approvals.py::reject_candidacy`, `test_api_v1_endpoints.py` |
+| REQ-019 | Reinicio sin pérdida de tareas | D3 | 1 | P0 | ✅ | Cola durable en base de datos (`ScheduledTask`, Alembic migrations) |
+| REQ-020 | Workers no duplican ejecución | D3 | 1 | P0 | ✅ | `test_phase1_worker_regressions.py::TestAtomicPredispatchAndFencingTransitions` |
+| REQ-021 | Recuperación tras caída | D3 | 1 | P0 | ✅ | `worker.py::recover_stale_tasks`, `test_phase1_worker_regressions.py` |
+| REQ-022 | Resultado incierto distinguido | D3 | 1 | P0 | ✅ | `result_uncertain` + `requires_intervention` en worker, CRM y tareas |
 | REQ-023 | Ventana perdida sin envío inesperado | D3 | 1 | P0 | ✅ | `test_phase1_mvp_vertical.py::test_missed_window_does_not_send_unexpectedly` |
 | REQ-024 | LinkedIn modo asistido | D7 | 3 | P1 | ⬜ | T-024 |
 | REQ-025 | Autorización específica para crear cuentas | D15 | 3 | P0 | ✅ | `test_security.py::test_account_creation_requires_authorization` |
-| REQ-026 | CRM con tabla, Kanban y detalle | D8 | 1 | P1 | ✅ | Modelos `CRMEntry`, `CRMEvent`, transiciones auditables |
+| REQ-026 | CRM con tabla, Kanban y detalle | D8 | 1 | P1 | ✅ | `api/crm.py`, `CRMEntry`, `CRMEvent`, `test_api_v1_endpoints.py` |
 | REQ-027 | Seguimientos con aprobación | D4 | 4 | P1 | ✅ | `test_security.py::test_follow_up_requires_approval` |
 | REQ-028 | Reporte por correo y dashboard | D8 | 4 | P1 | ⬜ | T-028 |
 | REQ-029 | BYOK con presupuesto | D14 | 2 | P0 | ⬜ | T-029 |
 | REQ-030 | Horarios y zona horaria configurables | D13 | 1 | P1 | ✅ | `core/clock.py`, `scheduling/service.py` |
-| REQ-031 | Operación con IDE cerrado | D8 | 1 | P0 | ✅ | Worker desacoplado ejecutable como proceso background |
+| REQ-031 | Operación con IDE cerrado | D8 | 1 | P0 | ✅ | `api/execution.py`, `worker.py` ejecutable como proceso background |
 | REQ-032 | Instalación reproducible | D1 | 5 | P1 | ⬜ | T-032 |
 
 | REQ-033 | Backups y restauración | D1 | 5 | P1 | ⬜ | T-033 |

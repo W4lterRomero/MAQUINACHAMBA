@@ -51,16 +51,18 @@ class SchedulingService:
         tenant_id: str,
         candidacy_id: str,
         scheduled_date: date,
+        version: int = 1,
     ) -> str:
         """
         Genera una clave de idempotencia determinista para evitar duplicar
-        la misma postulación en una misma fecha.
+        la misma postulación en una misma fecha y versión.
         """
         return hash_content(
             "idempotency-v1",
             tenant_id,
             candidacy_id,
             scheduled_date.isoformat(),
+            str(version),
         )
 
     @classmethod

@@ -80,8 +80,8 @@ def create_app() -> FastAPI:
         }
 
     # Registrar routers
-    # from backend.app.api import router as api_router
-    # app.include_router(api_router, prefix="/api/v1")
+    from backend.app.api import api_router
+    app.include_router(api_router, prefix="/api/v1")
 
     return app
 

@@ -47,21 +47,27 @@ class DurableExecutionWorker:
         session: AsyncSession,
         task_id: str,
         lease_seconds: int = 300,
+        tenant_id: Optional[str] = None,
     ) -> Optional[ScheduledTask]:
         """
         Intenta bloquear atómicamente una tarea pendiente debidamente vencida.
         Previene ejecuciones anticipadas y asigna lease temporal con fencing token incremental.
+        Filtra obligatoriamente por tenant_id si es proporcionado para aislamiento.
         """
         now = self.clock.now_utc()
         lease_expires = now + timedelta(seconds=lease_seconds)
+        where_conditions = [
+            ScheduledTask.id == task_id,
+            ScheduledTask.status == "pending",
+            ScheduledTask.locked_by.is_(None),
+            ScheduledTask.execution_instant_utc <= now,  # P0: Exige que el instante programado ya haya llegado
+        ]
+        if tenant_id:
+            where_conditions.append(ScheduledTask.tenant_id == tenant_id)
+
         stmt = (
             update(ScheduledTask)
-            .where(
-                ScheduledTask.id == task_id,
-                ScheduledTask.status == "pending",
-                ScheduledTask.locked_by.is_(None),
-                ScheduledTask.execution_instant_utc <= now,  # P0: Exige que el instante programado ya haya llegado
-            )
+            .where(*where_conditions)
             .values(
                 locked_by=self.worker_id,
                 locked_at=now,
@@ -78,7 +84,10 @@ class DurableExecutionWorker:
 
         await session.commit()
         # Obtener tarea actualizada desde BD
-        task_res = await session.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+        fetch_conds = [ScheduledTask.id == task_id]
+        if tenant_id:
+            fetch_conds.append(ScheduledTask.tenant_id == tenant_id)
+        task_res = await session.execute(select(ScheduledTask).where(*fetch_conds))
         claimed = task_res.scalar_one_or_none()
         if claimed:
             self.active_fence_tokens[task_id] = claimed.fence_token
@@ -89,6 +98,7 @@ class DurableExecutionWorker:
         session: AsyncSession,
         task_id: str,
         lease_seconds: int = 300,
+        tenant_id: Optional[str] = None,
     ) -> bool:
         """
         Renueva el lease de una tarea en ejecución asegurando que el worker sea el dueño
@@ -100,18 +110,22 @@ class DurableExecutionWorker:
 
         now = self.clock.now_utc()
         new_expires = now + timedelta(seconds=lease_seconds)
+        where_conds = [
+            ScheduledTask.id == task_id,
+            ScheduledTask.locked_by == self.worker_id,
+            ScheduledTask.fence_token == fence_token,
+            ScheduledTask.status == "executing",
+            or_(
+                ScheduledTask.lease_expires_at.is_(None),
+                ScheduledTask.lease_expires_at > now,
+            ),
+        ]
+        if tenant_id:
+            where_conds.append(ScheduledTask.tenant_id == tenant_id)
+
         stmt = (
             update(ScheduledTask)
-            .where(
-                ScheduledTask.id == task_id,
-                ScheduledTask.locked_by == self.worker_id,
-                ScheduledTask.fence_token == fence_token,
-                ScheduledTask.status == "executing",
-                or_(
-                    ScheduledTask.lease_expires_at.is_(None),
-                    ScheduledTask.lease_expires_at > now,
-                ),
-            )
+            .where(*where_conds)
             .values(
                 locked_at=now,
                 lease_expires_at=new_expires,
@@ -136,10 +150,14 @@ class DurableExecutionWorker:
         """
         start_dt = self.clock.now_utc()
         task_id = str(task.id)
+        task_tenant_id = str(task.tenant_id)
 
-        # 0. P0: Validar estado y propiedad persistidos (P0 - Reejecución sin propiedad)
+        # 0. P0: Validar estado y propiedad persistidos (P0 - Reejecución sin propiedad y aislamiento por tenant)
         task_res = await session.execute(
-            select(ScheduledTask).where(ScheduledTask.id == task_id)
+            select(ScheduledTask).where(
+                ScheduledTask.id == task_id,
+                ScheduledTask.tenant_id == task_tenant_id,
+            )
         )
         persisted_task = task_res.scalar_one_or_none()
         if not persisted_task:
@@ -177,7 +195,12 @@ class DurableExecutionWorker:
             persisted_task.lease_expires_at = None
 
             # Actualizar CRM
-            crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == persisted_task.candidacy_id))
+            crm_res = await session.execute(
+                select(CRMEntry).where(
+                    CRMEntry.candidacy_id == persisted_task.candidacy_id,
+                    CRMEntry.tenant_id == persisted_task.tenant_id,
+                )
+            )
             crm = crm_res.scalar_one_or_none()
             if crm:
                 old_st = crm.current_status
@@ -194,9 +217,12 @@ class DurableExecutionWorker:
             await session.commit()
             return False, "Ventana de ejecución perdida; tarea retenida sin envío."
 
-        # 3. Cargar Candidacy y Approval
+        # 3. Cargar Candidacy y Approval con verificación de tenant_id
         candidacy_res = await session.execute(
-            select(Candidacy).where(Candidacy.id == persisted_task.candidacy_id)
+            select(Candidacy).where(
+                Candidacy.id == persisted_task.candidacy_id,
+                Candidacy.tenant_id == persisted_task.tenant_id,
+            )
         )
         candidacy = candidacy_res.scalar_one_or_none()
         if not candidacy:
@@ -207,7 +233,10 @@ class DurableExecutionWorker:
             return False, "Candidatura no encontrada."
 
         approval_res = await session.execute(
-            select(Approval).where(Approval.id == persisted_task.approval_id)
+            select(Approval).where(
+                Approval.id == persisted_task.approval_id,
+                Approval.tenant_id == persisted_task.tenant_id,
+            )
         )
         approval = approval_res.scalar_one_or_none()
         if not approval:
@@ -292,6 +321,7 @@ class DurableExecutionWorker:
             update(ScheduledTask)
             .where(
                 ScheduledTask.id == persisted_task.id,
+                ScheduledTask.tenant_id == persisted_task.tenant_id,
                 ScheduledTask.status == "executing",
                 ScheduledTask.locked_by == self.worker_id,
                 ScheduledTask.fence_token == my_fence_token,
@@ -422,6 +452,7 @@ class DurableExecutionWorker:
             update(ScheduledTask)
             .where(
                 ScheduledTask.id == persisted_task.id,
+                ScheduledTask.tenant_id == persisted_task.tenant_id,
                 ScheduledTask.status == "executing",
                 ScheduledTask.locked_by == self.worker_id,
                 ScheduledTask.fence_token == my_fence_token,
@@ -466,12 +497,13 @@ class DurableExecutionWorker:
         task.dispatch_in_flight = False
 
         # =========================================================================
-        # 9. SINCRONIZACIÓN (ExecutionLog, Candidacy, CRM y Eventos)
+        # 9. SINCRONIZACIÓN (ExecutionLog, Candidacy, CRM y Eventos con tenant_id)
         # =========================================================================
         log_res = await session.execute(
             select(ExecutionLog)
             .where(
                 ExecutionLog.task_id == persisted_task.id,
+                ExecutionLog.tenant_id == persisted_task.tenant_id,
                 ExecutionLog.action == "submit_application",
                 ExecutionLog.started_at == start_dt,
             )
@@ -497,10 +529,20 @@ class DurableExecutionWorker:
                 duration_ms=duration,
             ))
 
-        cand_res = await session.execute(select(Candidacy).where(Candidacy.id == persisted_task.candidacy_id))
+        cand_res = await session.execute(
+            select(Candidacy).where(
+                Candidacy.id == persisted_task.candidacy_id,
+                Candidacy.tenant_id == persisted_task.tenant_id,
+            )
+        )
         cand_obj = cand_res.scalar_one_or_none()
 
-        crm_res = await session.execute(select(CRMEntry).where(CRMEntry.candidacy_id == persisted_task.candidacy_id))
+        crm_res = await session.execute(
+            select(CRMEntry).where(
+                CRMEntry.candidacy_id == persisted_task.candidacy_id,
+                CRMEntry.tenant_id == persisted_task.tenant_id,
+            )
+        )
         crm = crm_res.scalar_one_or_none()
 
         if exec_result == "success":
@@ -576,6 +618,7 @@ class DurableExecutionWorker:
         session: AsyncSession,
         stale_threshold_seconds: int = 300,
         clock: Optional[Clock] = None,
+        tenant_id: Optional[str] = None,
     ) -> list[dict]:
         """
         P0/P1 - Recuperación tras caída con prevención estricta de duplicados:
@@ -590,18 +633,23 @@ class DurableExecutionWorker:
           Reconciliar a 'completed' sin reenvío.
         - Si de forma verificable no hubo despacho previo (ej. attempts == 0 y sin logs):
           reset_to_pending.
+        - Aislamiento multi-tenant: si se provee tenant_id, solo recupera tareas de ese tenant.
         """
         c = clock or get_clock()
         now = c.now_utc()
         threshold_dt = now - timedelta(seconds=stale_threshold_seconds)
 
-        stmt = select(ScheduledTask).where(
+        where_conds = [
             ScheduledTask.status == "executing",
             or_(
                 and_(ScheduledTask.lease_expires_at.is_not(None), ScheduledTask.lease_expires_at < now),
                 and_(ScheduledTask.lease_expires_at.is_(None), ScheduledTask.locked_at < threshold_dt),
             ),
-        )
+        ]
+        if tenant_id:
+            where_conds.append(ScheduledTask.tenant_id == tenant_id)
+
+        stmt = select(ScheduledTask).where(*where_conds)
         res = await session.execute(stmt)
         stale_tasks = res.scalars().all()
         recovered = []
@@ -610,10 +658,13 @@ class DurableExecutionWorker:
             current_fence_token = task.fence_token
             new_fence_token = current_fence_token + 1
 
-            # Inspeccionar el historial de logs
+            # Inspeccionar el historial de logs con aislamiento por tenant_id
             log_res = await session.execute(
                 select(ExecutionLog)
-                .where(ExecutionLog.task_id == task.id)
+                .where(
+                    ExecutionLog.task_id == task.id,
+                    ExecutionLog.tenant_id == task.tenant_id,
+                )
                 .order_by(ExecutionLog.started_at.desc())
             )
             logs = log_res.scalars().all()
@@ -656,11 +707,12 @@ class DurableExecutionWorker:
                 rec_action = "reset_to_pending"
                 rec_reason = "Tarea bloqueada pero sin ningún intento de despacho iniciado; reintento seguro."
 
-            # Transición ATÓMICA sobre ScheduledTask
+            # Transición ATÓMICA sobre ScheduledTask con tenant_id
             rec_stmt = (
                 update(ScheduledTask)
                 .where(
                     ScheduledTask.id == task.id,
+                    ScheduledTask.tenant_id == task.tenant_id,
                     ScheduledTask.fence_token == current_fence_token,
                     ScheduledTask.status == "executing",
                 )
@@ -691,7 +743,10 @@ class DurableExecutionWorker:
             # Sincronizar Candidacy y CRM si aplica
             if cand_target_status:
                 cand_res = await session.execute(
-                    select(Candidacy).where(Candidacy.id == task.candidacy_id)
+                    select(Candidacy).where(
+                        Candidacy.id == task.candidacy_id,
+                        Candidacy.tenant_id == task.tenant_id,
+                    )
                 )
                 candidacy = cand_res.scalar_one_or_none()
                 if candidacy:
@@ -699,7 +754,10 @@ class DurableExecutionWorker:
 
             if crm_target_status:
                 crm_res = await session.execute(
-                    select(CRMEntry).where(CRMEntry.candidacy_id == task.candidacy_id)
+                    select(CRMEntry).where(
+                        CRMEntry.candidacy_id == task.candidacy_id,
+                        CRMEntry.tenant_id == task.tenant_id,
+                    )
                 )
                 crm = crm_res.scalar_one_or_none()
                 if crm:

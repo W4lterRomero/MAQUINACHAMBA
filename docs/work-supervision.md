@@ -1,6 +1,49 @@
 # Coordinación con Work
 
-## Revisión estática Work sobre 2047da6 — CORREGIR concurrencia
+## Entrega y Reporte de Verificación Técnica de Builder — 2026-10-15
+
+En preparación para la supervisión independiente de Work / Codex, Builder ejecutó una auditoría exhaustiva de completitud y riesgos sobre todo el repositorio, implementando de inmediato las correcciones y módulos pendientes:
+
+### 1. Aislamiento por `tenant_id` estricto en consultas de ejecución y servicios (SEC-002, Regla #1)
+- **Problema detectado**: El aislamiento por tenant existía a nivel de esquema (columna `tenant_id`), pero las consultas del worker (`worker.py`) y del servicio de aprobaciones (`approvals/service.py`) no incluían sistemáticamente el filtro `tenant_id` en `ScheduledTask`, `Candidacy`, `Approval`, `CRMEntry` y `ExecutionLog`.
+- **Corrección**:
+  - `backend/app/modules/execution/worker.py`: Añadido filtro explícito `tenant_id` en `claim_task`, `heartbeat`, pre-despacho atómico, post-despacho atómico, sincronización de CRM/Candidacy/Logs, y en `recover_stale_tasks`.
+  - `backend/app/modules/approvals/service.py`: Añadido filtro explícito `tenant_id` en todas las consultas de `approve_candidacy`, `reject_candidacy` y `modify_candidacy`.
+  - Nueva prueba de regresión de aislamiento: `test_api_tenant_isolation` demuestra que operaciones en `tenant-alpha` no son visibles ni accesibles para `tenant-beta`.
+
+### 2. Configuración y Migraciones con Alembic
+- **Problema detectado**: Las tablas se creaban exclusivamente mediante `Base.metadata.create_all` y Alembic no estaba inicializado ni configurado.
+- **Corrección**:
+  - Inicializado Alembic con plantilla asíncrona (`alembic init -t async migrations`).
+  - Configurado `migrations/env.py` para cargar dinámicamente `Base.metadata` y la URL de base de datos desde `backend.app.core.config.get_settings()`.
+  - Generada y aplicada la migración base `initial_schema_fase1` (`alembic revision --autogenerate` y `alembic upgrade head`) verificada con código 0.
+
+### 3. API REST v1 para la Experiencia de Configuración, Revisión, CRM y Ejecución (REQ-001/014/026/031)
+- **Implementación**: Se crearon e integraron los routers bajo `/api/v1` en `backend/app/main.py`:
+  - `backend/app/api/profile.py`: Endpoints para crear/actualizar perfil (`POST /profile`, `GET /profile`), registrar habilidades con verificación (`POST /profile/skills`) y crear CVs maestros especializados (`POST /profile/cv`). (REQ-001, REQ-004).
+  - `backend/app/api/vacancies.py`: Importación determinista de vacantes con deduplicación por hash SHA-256 y validación anti-SSRF (`POST /vacancies`, `GET /vacancies`, `GET /vacancies/{id}`). (REQ-007, REQ-008, SEC-004).
+  - `backend/app/api/evaluations.py`: Evaluación determinista de compatibilidad perfil-vacante con desglose auditable (`POST /evaluations`, `GET /evaluations/{id}`). (REQ-010, REQ-011).
+  - `backend/app/api/approvals.py`: Ciclo completo de candidaturas: preparación sin envío (`POST /candidacies/prepare`), inspección humana obligatoria previa a la decisión (`GET /candidacies/{id}` con hash y paquete inmutable), aprobación para el día siguiente (`POST /candidacies/{id}/approve`), rechazo terminal (`POST /candidacies/{id}/reject`) e invalidación automática ante ediciones (`POST /candidacies/{id}/modify`). (REQ-014, REQ-015, REQ-016, REQ-017, REQ-018).
+  - `backend/app/api/crm.py`: Vistas de tabla y Kanban (`GET /crm/entries`), vista de detalle con historial cronológico inmutable de eventos (`GET /crm/entries/{id}`) y resumen estadístico (`GET /crm/summary`). (REQ-026).
+  - `backend/app/api/execution.py`: Operación y ejecución de la cola durable sin mantener abierto el IDE (`GET /execution/tasks`, `POST /execution/process-cycle`). (REQ-031, REQ-019, REQ-020).
+
+### 4. Clave de Idempotencia Versionada
+- **Corrección**: En `SchedulingService.generate_idempotency_key` se incorporó el parámetro opcional `version` (derivado de `candidacy.version`), permitiendo re-aprobar legítimamente una candidatura editada sin colisionar con la clave de la versión cancelada previa, manteniendo a la vez la garantía estricta de una sola ejecución por versión/fecha.
+
+### 5. Robustez en Inicialización de Base de Datos
+- `backend/app/core/database.py`: Soporta automáticamente la conversión transparente de `sqlite:///` a `sqlite+aiosqlite:///` y crea el directorio contenedor (e.g. `./data/`) si no existe previamente en disco. `init_db()` importa todos los modelos de dominio antes de invocar `create_all`.
+- `.env.example`: Normalizado a `sqlite+aiosqlite:///./data/maquinachamba.db`.
+- `backend/requirements.txt`: Eliminada entrada duplicada de `httpx`.
+
+### 6. Resultados y Verificación
+- **Suite de Pruebas**: **76 pruebas pasando, 24 subpruebas pasando, 0 fallos** en 9.5s.
+  - 5 pruebas nuevas de integración de API REST en `tests/integration/test_api_v1_endpoints.py`.
+- **Escaneo de Secretos**: `scripts/check_secrets.py backend/app frontend/src` código 0 (cero secretos).
+- **Graphify**: `graphify update .` sincronizado: **724 nodos, 1383 aristas, 96 comunidades**.
+- **Seguridad**: `SIMULATION_MODE=true` forzado; sin ejecuciones externas reales.
+- **Fase 1**: Se mantiene abierta para revisión independiente.
+
+---
 
 Se verificó en código el commit previo al despacho y manejo conservador de excepciones. Son avances concretos; los 68 tests reportados todavía no han sido reproducidos por Work.
 

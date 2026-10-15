@@ -296,6 +296,10 @@ erDiagram
 | locked_at | TIMESTAMP | |
 | attempts | INTEGER | Default 0 |
 | max_attempts | INTEGER | Default 1 |
+| lease_expires_at | TIMESTAMP | Expiración del lease temporal |
+| fence_token | INTEGER | Token incremental para fencing contra workers zombi |
+| dispatch_in_flight | BOOLEAN | Marcador atómico de despacho en vuelo |
+| last_dispatch_attempt_id | VARCHAR(64) | Identificador único del intento de despacho |
 | created_at | TIMESTAMP | |
 | updated_at | TIMESTAMP | |
 

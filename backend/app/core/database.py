@@ -62,8 +62,21 @@ class Base(DeclarativeBase):
 
 def _create_engine():
     """Crea el engine async según la configuración."""
+    import os
     settings = get_settings()
     url = settings.database_url
+
+    # Normalizar url de SQLite para async si viene sin driver explícito
+    if url.startswith("sqlite:///"):
+        url = url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+
+    # Asegurar que el directorio de datos existe si es una ruta local SQLite
+    if "sqlite" in url:
+        db_path = url.split(":///")[-1] if ":///" in url else None
+        if db_path and not db_path.startswith(":memory:"):
+            dir_name = os.path.dirname(os.path.abspath(db_path))
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
 
     # SQLite needs special handling for async
     connect_args = {}
@@ -98,6 +111,17 @@ async_session_factory = async_sessionmaker(
 )
 
 
+def import_all_models():
+    """Importa todos los modelos para registrarlos en Base.metadata."""
+    import backend.app.modules.users.models  # noqa: F401
+    import backend.app.modules.profile.models  # noqa: F401
+    import backend.app.modules.cv.models  # noqa: F401
+    import backend.app.modules.vacancies.models  # noqa: F401
+    import backend.app.modules.evaluation.models  # noqa: F401
+    import backend.app.modules.approvals.models  # noqa: F401
+    import backend.app.modules.crm.models  # noqa: F401
+
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Dependency para obtener una sesión de base de datos."""
     async with async_session_factory() as session:
@@ -110,7 +134,8 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Inicializa la base de datos creando todas las tablas."""
+    """Inicializa la base de datos creando todas las tablas registradas."""
+    import_all_models()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
