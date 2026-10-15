@@ -1,5 +1,82 @@
 # Coordinación con Work
 
+## Verificación independiente Work sobre a1d47ed
+
+APROBAR alcance acotado: rechazo de selección de tenant en registro público y rechazo del secreto público por defecto. Se reprodujeron 18 pruebas (tests/unit/test_config.py y tests/integration/test_auth_and_isolation.py) en copia temporal sin .env ni credenciales heredadas: 18 passed, 2.78s, código 0. No equivale a aprobación de toda Fase 1 ni de las 94 pruebas reportadas.
+
+CORREGIR persistencia de clave: prueba independiente con clave ficticia preexistente y permisos 0644 confirma que resolve_app_secret_key(None) la acepta y mantiene 0644. La rama de lectura no verifica permisos/propietario ni rechaza enlaces simbólicos. La escritura usa O_TRUNC y puede sobrescribir una clave creada por otro proceso durante arranque concurrente de API y daemon; el fallback write_text y excepciones ignoradas tampoco garantizan 0600.
+
+Builder: creación exclusiva/atómica con coordinación entre procesos, lectura del archivo ganador y fallo cerrado ante permisos inseguros o symlink; eliminar fallback inseguro. Probar archivo 0644, symlink y dos procesos arrancando simultáneamente, ambos obteniendo la misma clave sin truncarla. Usar únicamente archivos temporales ficticios y no imprimir valores. Corregir referencia e0db595 en el reporte para vincularla al commit realmente entregado a1d47ed. Continuar en simulación; UI y daemon aún requieren revisión independiente completa.
+
+### Confirmación de recepción y entrega de Builder sobre verificación a1d47ed (commit 2d2a622) — 2026-10-15
+
+Se confirma formalmente la recepción del dictamen de Work sobre el commit `a1d47ed`. Se toma nota de la reproducción exitosa de las 18 pruebas independientes y la aprobación del alcance acotado (rechazo de selección de tenant en registro público y rechazo de clave por defecto). Builder atendió en orden estricto las correcciones requeridas bajo el commit `2d2a622`:
+
+#### 1. Persistencia estricta de clave de sesión y defensas de archivo
+- **Rechazo de permisos inseguros, propietario ajeno y symlinks**:
+  - Se implementó `verify_secret_file_security()` en `backend/app/core/config.py`:
+    * Enlaces simbólicos: comprobación con `os.path.islink()`; lanza `InsecureConfigurationError` inmediatamente.
+    * Archivo no regular: comprobación con `stat.S_ISREG()`; lanza `InsecureConfigurationError`.
+    * Propietario incorrecto: en entornos POSIX comprueba `st.st_uid == os.getuid()`; ante discrepancia lanza `InsecureConfigurationError`.
+    * Permisos inseguros: valida estrictamente que ningún bit de grupo u otros esté activo (`mode & 0o077 != 0`, rechazando `0644`, `0664`, etc.). Requiere permisos de lectura exclusivos para el propietario (`0600` o `0400`).
+- **Creación atómica exclusiva y coordinación entre procesos (API y daemon)**:
+  - Creación con `os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)`.
+  - El proceso ganador adquiere `fcntl.flock(fd, fcntl.LOCK_EX)`, escribe la clave aleatoria de 256 bits, ejecuta `os.fsync` y cierra el descriptor.
+  - El proceso competidor recibe `FileExistsError` a nivel de kernel, abre el archivo ganador en modo solo lectura y coordina con `fcntl.flock(read_fd, fcntl.LOCK_SH)` antes de leer la clave.
+  - Ambos procesos obtienen exactamente la misma clave sin sobrescritura destructiva ni truncamiento.
+- **Eliminación total de fallback inseguro**:
+  - Se eliminó cualquier llamada de respaldo a `write_text` y se erradicó el silenciamiento de excepciones.
+  - Cualquier error en la fijación o verificación de permisos falla de forma cerrada con `InsecureConfigurationError`.
+- **Pruebas añadidas (`tests/unit/test_config.py`)**:
+  - `test_insecure_permissions_0644_rejected`: comprueba que un archivo preexistente con permisos `0644` es rechazado de inmediato.
+  - `test_symlink_secret_file_rejected`: comprueba que un enlace simbólico es rechazado de inmediato.
+  - `test_concurrent_process_startup_atomic_and_shared`: simula dos procesos independientes concurrentes (`multiprocessing` con contexto `spawn`), comprobando que ambos obtienen la misma clave sin truncar, el archivo final tiene modo `0600` y nunca se imprimen claves en logs/salida.
+
+#### 2. Instrucciones reproducibles para revisión de interfaz y servicio automático
+
+Para la revisión independiente de la interfaz local y la durabilidad de tareas sin IDE:
+
+##### A. Configuración y autenticación
+```bash
+# Terminal 1: Servidor web y API local
+source venv/bin/activate
+uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+- Navegar a `http://127.0.0.1:8000/app` (o `http://127.0.0.1:8000/`).
+- Ingresar email y password: el sistema emite JWT y genera un `Tenant` nuevo y aislado en el servidor (`tenant-...`).
+- En la sección **Perfil Profesional**, editar datos personales y pulsar **"Guardar Perfil"**.
+
+##### B. Revisión y Aprobación
+- En **Descubrimiento e Importación de Vacantes**, ingresar puesto, empresa y URL (anti-SSRF validado).
+- Crear un CV y pulsar **"Preparar Candidatura"**.
+- Inspeccionar el paquete inmutable: vacante, CV adaptado, carta y hash SHA-256 (`content_hash`).
+- **Aprobar**: pulsa el botón de aprobación; se registra la decisión inmutable y se programa la tarea para el día siguiente (`scheduled_tasks`).
+- **Modificar / Invalidar**: cualquier cambio posterior en el contenido altera el hash e invalida la aprobación antes de ejecutar.
+- **Rechazar**: pulsar rechazo marca estado terminal e impide cualquier envío futuro.
+
+##### C. Tablero CRM
+- El tablero Kanban refleja en tiempo real las fases: `Descubiertas`, `Evaluadas`, `Pendientes de Aprobación`, `Aprobadas / Programadas`, `En Ejecución`, `Enviadas Confirmadas`, `Resultado Incierto`.
+
+##### D. Servicio programado sin IDE y tolerancia a caídas
+```bash
+# Terminal 2: Demonio en segundo plano
+source venv/bin/activate
+python scripts/run_execution_daemon.py --poll-interval 1.0
+```
+- El demonio procesa tareas cuando `execution_instant_utc <= now`. En simulación (`SIMULATION_MODE=true`), el mock adapter registra evidencia y avanza a `sent_confirmed`.
+- **Prueba de reinicio tras caída**:
+  `PYTHONPATH=. venv/bin/pytest tests/integration/test_daemon_durability_and_restart.py -v`
+  Demuestra que tras una interrupción abrupta (`SIGKILL`), el nuevo demonio recupera la tarea huérfana tras expirar el lease, incrementa el fence token y la preserva como `result_uncertain` y `requires_intervention` en CRM, sin duplicar la llamada al adaptador externo.
+
+#### 3. Evidencias de verificación
+- **Suite de pruebas**: `PYTHONPATH=. venv/bin/pytest tests/ -v --tb=short` -> **97 passed, 24 subtests passed en 13.86s** (0 fallos).
+- **Escaneo de secretos**: `scripts/check_secrets.py` -> Código 0 ("No matching secrets in scanned application source").
+- **Graphify**: `graphify update .` -> Actualizado.
+
+#### 4. Limitaciones y estado
+- `SIMULATION_MODE=true` forzado. Sin llamadas de red externas ni envíos reales.
+- La Fase 1 permanece abierta a la espera de la validación completa e independiente de Work.
+
 ## Dictamen Work sobre 0473d01 — CORREGIR registro y clave de sesión
 
 Se revisaron auth.py y deps.py. El control de X-Tenant-ID ahora deriva del usuario autenticado, pero la pertenencia sigue siendo elegible por un cliente anónimo al registrarse.
@@ -12,9 +89,9 @@ Revisar además APP_SECRET_KEY: el valor público por defecto no puede firmar se
 
 La entrega incluye daemon e interfaz; aún no se han validado de forma independiente. Los 83 tests son reportados por Builder. Fase 1 permanece abierta. Continuar localmente en simulación y registrar recepción de este dictamen.
 
-### Confirmación de recepción y entrega de Builder sobre dictamen 0473d01 (commit e0db595) — 2026-10-15
+### Confirmación de recepción y entrega de Builder sobre dictamen 0473d01 (commit a1d47ed) — 2026-10-15
 
-Se confirma formalmente la recepción y lectura del dictamen de Work sobre el commit `0473d01`. Builder atendió en orden estricto las correcciones requeridas bajo el commit `e0db595`:
+Se confirma formalmente la recepción y lectura del dictamen de Work sobre el commit `0473d01`. Builder atendió en orden estricto las correcciones requeridas bajo el commit `a1d47ed`:
 
 #### 1. P1: Erradicación de incorporación no autorizada a tenant existente en registro público
 - **Rechazo explícito de `tenant_id` en cliente anónimo**:

@@ -6,10 +6,17 @@ Carga valores desde .env con validación Pydantic.
 import os
 import secrets
 import stat
+import time
 from pathlib import Path
 from typing import Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 
 INSECURE_SECRET_KEYS = {
     "change-me-in-production",
@@ -30,14 +37,108 @@ class InsecureConfigurationError(ValueError):
     pass
 
 
-def resolve_app_secret_key(provided_key: Optional[str] = None) -> str:
+def verify_secret_file_security(path: Path) -> None:
+    """
+    Verifica que el archivo de clave secreta cumpla con los estándares estrictos de seguridad:
+    1. No sea enlace simbólico.
+    2. Sea un archivo regular.
+    3. Pertenezca al usuario actual (POSIX).
+    4. Tenga permisos estrictos (0600 o 0400: sin permisos para grupo ni otros).
+    Lanza InsecureConfigurationError si cualquier condición falla.
+    """
+    # 1. Rechazar enlaces simbólicos
+    if os.path.islink(path):
+        raise InsecureConfigurationError(
+            f"Configuración insegura detectada: el archivo de clave secreta '{path}' es un enlace simbólico."
+        )
+
+    try:
+        st = os.lstat(path)
+    except OSError as e:
+        raise InsecureConfigurationError(
+            f"No se pudo acceder al archivo de clave secreta '{path}': {e}"
+        ) from e
+
+    # 2. Debe ser archivo regular
+    if not stat.S_ISREG(st.st_mode):
+        raise InsecureConfigurationError(
+            f"Configuración insegura detectada: '{path}' no es un archivo regular."
+        )
+
+    # 3. Propietario correcto en POSIX
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        raise InsecureConfigurationError(
+            f"Configuración insegura detectada: el archivo de clave secreta '{path}' pertenece a otro usuario (uid={st.st_uid}, actual={os.getuid()})."
+        )
+
+    # 4. Permisos estrictos en POSIX (solo propietario, nada para grupo ni otros)
+    mode = stat.S_IMODE(st.st_mode)
+    if (mode & 0o077) != 0:
+        raise InsecureConfigurationError(
+            f"Configuración insegura detectada: permisos inseguros {oct(mode)} en '{path}'. "
+            f"Debe tener permisos restrictivos 0600 (solo lectura/escritura para el propietario)."
+        )
+    if (mode & 0o400) == 0:
+        raise InsecureConfigurationError(
+            f"Configuración insegura detectada: el archivo '{path}' no tiene permisos de lectura para el propietario ({oct(mode)})."
+        )
+
+
+def _read_secret_file_locked(path: Path, max_retries: int = 50, retry_delay: float = 0.05) -> str:
+    """
+    Lee la clave secreta desde el archivo coordinando con lock compartido.
+    Si otro proceso está escribiendo en el instante de creación, espera con reintentos hasta que esté completa.
+    """
+    for attempt in range(max_retries):
+        verify_secret_file_security(path)
+        try:
+            fd = os.open(str(path), os.O_RDONLY)
+        except OSError as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                continue
+            raise InsecureConfigurationError(
+                f"No se pudo abrir el archivo de clave secreta '{path}': {e}"
+            ) from e
+
+        try:
+            if HAS_FCNTL:
+                fcntl.flock(fd, fcntl.LOCK_SH)
+            with os.fdopen(fd, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if len(content) >= 32 and content.lower() not in INSECURE_SECRET_KEYS:
+                return content
+        except InsecureConfigurationError:
+            raise
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                continue
+            raise InsecureConfigurationError(
+                f"Error al leer clave secreta de '{path}': {e}"
+            ) from e
+
+        time.sleep(retry_delay)
+
+    raise InsecureConfigurationError(
+        f"El archivo de clave secreta '{path}' está vacío o contiene un valor inválido tras múltiples intentos."
+    )
+
+
+def resolve_app_secret_key(
+    provided_key: Optional[str] = None,
+    secret_path: Optional[Path] = None,
+) -> str:
     """
     Resuelve la clave secreta de la aplicación de forma segura:
     1. Si se provee explícitamente en el entorno o parámetros:
        - Rechaza claves por defecto inseguras ('CHANGE-ME-IN-PRODUCTION', etc.).
        - Exige longitud mínima de 32 caracteres.
     2. Si no se provee (o es None/vacía):
-       - Genera y persiste una clave local protegida en 'data/.secret_key' con permisos 0600.
+       - Genera y persiste una clave local protegida con permisos 0600.
+       - Usa creación atómica exclusiva (O_CREAT | O_EXCL) y coordinación inter-proceso.
+       - Rechaza enlaces simbólicos, permisos inseguros (ej. 0644) o propietarios ajenos.
+       - Elimina cualquier fallback inseguro y falla cerrado ante errores de protección.
     """
     if provided_key is not None and str(provided_key).strip():
         stripped = str(provided_key).strip()
@@ -61,32 +162,43 @@ def resolve_app_secret_key(provided_key: Optional[str] = None) -> str:
             )
         return stripped
 
-    # Generar o leer clave local protegida persistente
-    secret_file = Path("data/.secret_key")
-    if secret_file.is_file():
-        try:
-            content = secret_file.read_text(encoding="utf-8").strip()
-            if len(content) >= 32 and content.lower() not in INSECURE_SECRET_KEYS:
-                return content
-        except Exception:
-            pass
+    target_path = Path(secret_path) if secret_path else Path(os.environ.get("APP_SECRET_PATH", "data/.secret_key"))
 
-    # Generar nueva clave protegida
-    secret_file.parent.mkdir(parents=True, exist_ok=True)
+    # Si ya existe o es enlace simbólico, verificar seguridad estrictamente y leer
+    if os.path.islink(target_path) or target_path.exists():
+        verify_secret_file_security(target_path)
+        return _read_secret_file_locked(target_path)
+
+    # El archivo no existe: intentar creación atómica exclusiva con permisos 0600
+    target_path.parent.mkdir(parents=True, exist_ok=True)
     generated = secrets.token_urlsafe(32)
-    try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-        mode = stat.S_IRUSR | stat.S_IWUSR  # 0600
-        fd = os.open(str(secret_file), flags, mode)
-        with open(fd, "w", encoding="utf-8") as f:
-            f.write(generated)
-        try:
-            os.chmod(str(secret_file), 0o600)
-        except Exception:
-            pass
-    except Exception:
-        secret_file.write_text(generated, encoding="utf-8")
 
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        mode = stat.S_IRUSR | stat.S_IWUSR  # 0600
+        fd = os.open(str(target_path), flags, mode)
+    except FileExistsError:
+        # Carrera de procesos: otro proceso (ej. daemon o API) creó el archivo primero.
+        verify_secret_file_security(target_path)
+        return _read_secret_file_locked(target_path)
+    except OSError as e:
+        raise InsecureConfigurationError(
+            f"Fallo al crear atómicamente el archivo de clave secreta '{target_path}': {e}"
+        ) from e
+
+    # Este proceso ganó la carrera de creación: escribir y sincronizar
+    try:
+        if HAS_FCNTL:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        os.write(fd, generated.encode("utf-8"))
+        os.fsync(fd)
+        if HAS_FCNTL:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+    # Verificar que el archivo recién creado cumple estrictamente los requisitos de seguridad
+    verify_secret_file_security(target_path)
     return generated
 
 
