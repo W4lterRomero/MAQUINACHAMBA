@@ -8,6 +8,7 @@ import asyncio
 import logging
 import signal
 import sys
+from datetime import time
 from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -36,8 +37,10 @@ class DurableExecutionDaemon:
         poll_interval_seconds: float = 2.0,
         clock: Optional[Clock] = None,
         session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
+        window_start: Optional[time] = None,
+        window_end: Optional[time] = None,
     ):
-
+        settings = get_settings()
         self.worker_id = worker_id
         self.poll_interval_seconds = poll_interval_seconds
         self.clock = clock or get_clock()
@@ -45,6 +48,22 @@ class DurableExecutionDaemon:
         self.worker = DurableExecutionWorker(worker_id=self.worker_id, clock=self.clock)
         self._stop_event = asyncio.Event()
         self.is_running = False
+
+        if window_start is not None:
+            self.window_start = window_start
+        else:
+            try:
+                self.window_start = time.fromisoformat(settings.execution_window_start)
+            except Exception:
+                self.window_start = time(9, 0)
+
+        if window_end is not None:
+            self.window_end = window_end
+        else:
+            try:
+                self.window_end = time.fromisoformat(settings.execution_window_end)
+            except Exception:
+                self.window_end = time(18, 0)
 
     async def run_single_iteration(self) -> dict:
         """
@@ -103,6 +122,8 @@ class DurableExecutionDaemon:
                     success, message = await self.worker.execute_task(
                         session=session,
                         task=claimed,
+                        window_start=self.window_start,
+                        window_end=self.window_end,
                     )
                     processed.append({
                         "task_id": task_id,
@@ -124,10 +145,11 @@ class DurableExecutionDaemon:
                 "tasks": processed,
             }
 
-    async def run_forever(self):
-        """Bucle principal de ejecución del demonio."""
+    async def run_forever(self, max_iterations: Optional[int] = None):
+        """Bucle principal de ejecución del demonio con límite opcional de iteraciones."""
         self.is_running = True
         self._stop_event.clear()
+        iteration_count = 0
         logger.info(
             f"Demonio de ejecución autónomo iniciado [{self.worker_id}]. "
             f"Intervalo de escaneo: {self.poll_interval_seconds}s. Modo simulación activo."
@@ -139,6 +161,10 @@ class DurableExecutionDaemon:
                     await self.run_single_iteration()
                 except Exception as exc:
                     logger.error(f"Error en iteración del demonio: {exc}", exc_info=True)
+
+                iteration_count += 1
+                if max_iterations is not None and iteration_count >= max_iterations:
+                    break
 
                 try:
                     await asyncio.wait_for(
@@ -156,7 +182,13 @@ class DurableExecutionDaemon:
         self._stop_event.set()
 
 
-async def main():
+async def main(
+    interval: float = 3.0,
+    once: bool = False,
+    max_iterations: Optional[int] = None,
+    window_start: Optional[time] = None,
+    window_end: Optional[time] = None,
+):
     """Punto de entrada de línea de comandos para el launcher del demonio."""
     logging.basicConfig(
         level=logging.INFO,
@@ -166,7 +198,11 @@ async def main():
     logger.info(f"Iniciando servicio de fondo Máquina de Chamba (simulación={settings.simulation_mode})...")
 
     await init_db()
-    daemon = DurableExecutionDaemon(poll_interval_seconds=3.0)
+    daemon = DurableExecutionDaemon(
+        poll_interval_seconds=interval,
+        window_start=window_start,
+        window_end=window_end,
+    )
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -176,7 +212,10 @@ async def main():
             pass  # En plataformas donde add_signal_handler no esté soportado
 
     try:
-        await daemon.run_forever()
+        if once:
+            await daemon.run_single_iteration()
+        else:
+            await daemon.run_forever(max_iterations=max_iterations)
     finally:
         await close_db()
 
