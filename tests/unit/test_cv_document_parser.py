@@ -195,3 +195,124 @@ def test_prompt_injection_signals_detected_and_treated_as_data():
     assert "Python" in [s.name for s in doc.skills]
     # Todo sigue pendiente
     assert all(s.verification_status == "pending" for s in doc.skills)
+
+
+def test_negative_work_synthetic_no_invented_facts():
+    """
+    PRUEBA NEGATIVA EXIGIDA POR WORK (Hito 2.1 P1):
+    Texto ficticio: 'Persona ficticia\\nInteres en aprender Python. Sin experiencia laboral ni fechas declaradas.'
+    Garantía: Cero años inventados, cero niveles inventados y cero empleos fabricados.
+    """
+    raw_text = "Persona ficticia\nInteres en aprender Python. Sin experiencia laboral ni fechas declaradas."
+    doc = DocumentParser.parse(raw_text.encode("utf-8"), "cv_ficticio.txt")
+
+    # 1. Habilidades: Python detectado como interés/mención pero SIN inventar años ni nivel
+    python_skills = [s for s in doc.skills if s.name.lower() == "python"]
+    assert len(python_skills) == 1
+    py = python_skills[0]
+    assert py.years_experience is None, f"Se inventaron años: {py.years_experience}"
+    assert py.proficiency is None, f"Se inventó nivel: {py.proficiency}"
+    assert py.context_type == "interest", f"No se distinguió interés: {py.context_type}"
+    assert py.source_fragment is not None
+    assert "aprender python" in py.source_fragment.lower()
+
+    # 2. Experiencias: CERO empleos inventados (NO crear 'Empresa por verificar' ni fechas 2022-01-01)
+    assert len(doc.experiences) == 0, f"Se inventaron empleos: {doc.experiences}"
+
+
+def test_date_precision_preservation_and_explicit_no_experience():
+    """Verifica que se preserve la precisión de fechas y no se fabriquen empleos ante negación explícita."""
+    # Caso 1: Fechas con solo año
+    text_year = """
+    Candidato Alfa
+    alfa@example.com
+    
+    Experiencia:
+    Software Engineer - Global Tech
+    2020 - 2023
+    Desarrollo de servicios.
+    """
+    doc_year = DocumentParser.parse(text_year.encode("utf-8"), "cv_alfa.txt")
+    assert len(doc_year.experiences) == 1
+    exp = doc_year.experiences[0]
+    assert exp.date_precision == "year"
+    assert exp.start_date == "2020-01-01"
+    assert exp.end_date == "2023-12-31"
+
+    # Caso 2: Fechas con mes y año
+    text_month = """
+    Candidato Beta
+    beta@example.com
+    
+    Experiencia:
+    Data Engineer - Big Data Corp
+    03/2021 - 09/2022
+    Pipelines de datos.
+    """
+    doc_month = DocumentParser.parse(text_month.encode("utf-8"), "cv_beta.txt")
+    assert len(doc_month.experiences) == 1
+    exp_m = doc_month.experiences[0]
+    assert exp_m.date_precision == "month"
+    assert exp_m.start_date == "2021-03-01"
+
+    # Caso 3: Texto sin experiencia declarada
+    text_none = "Graduado reciente. Sin experiencia laboral previa."
+    doc_none = DocumentParser.parse(text_none.encode("utf-8"), "cv_none.txt")
+    assert len(doc_none.experiences) == 0
+
+
+def test_zip_bomb_high_compression_ratio_rejected():
+    """
+    Verifica que un archivo DOCX/ZIP con ratio de compresión sospechoso (> 100x)
+    sea rechazado antes de descomprimir para evitar zip bombs (P1).
+    """
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        # 200 KB de ceros se comprimen a ~200 bytes (ratio ~1000x)
+        z.writestr("word/document.xml", b"\x00" * 200_000)
+    high_ratio_bytes = buf.getvalue()
+
+    with pytest.raises(InvalidDocumentError, match="Razón de compresión sospechosa"):
+        DocumentParser.parse(high_ratio_bytes, "bomb.docx")
+
+
+def test_zip_too_many_entries_rejected():
+    """Verifica que un ZIP con más de 500 entradas sea rechazado inmediatamente."""
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for i in range(505):
+            z.writestr(f"file_{i}.txt", b"a")
+    too_many_bytes = buf.getvalue()
+
+    with pytest.raises(InvalidDocumentError, match="demasiadas entradas"):
+        DocumentParser.parse(too_many_bytes, "too_many.docx")
+
+
+def test_zip_decompressed_size_exceeded_rejected():
+    """Verifica que un ZIP cuyo tamaño descomprimido exceda 20 MB sea rechazado."""
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as z:
+        z.writestr("word/document.xml", b"x" * (21 * 1024 * 1024))
+    too_large_bytes = buf.getvalue()
+
+    with pytest.raises(InvalidDocumentError, match="El archivo excede el tamaño máximo permitido de 5 MB"):
+        # Al no estar comprimido, ya excede el límite del archivo físico
+        DocumentParser.parse(too_large_bytes, "oversized.docx")
+
+
+@pytest.mark.skipif(pypdf is None, reason="pypdf no disponible")
+def test_pdf_too_many_pages_rejected():
+    """Verifica que un archivo PDF con más de 50 páginas sea rechazado por presupuesto de recursos."""
+    writer = pypdf.PdfWriter()
+    for _ in range(55):
+        writer.add_blank_page(width=100, height=100)
+    buf = io.BytesIO()
+    writer.write(buf)
+    pdf_bytes = buf.getvalue()
+
+    with pytest.raises(InvalidDocumentError, match="excede el número máximo permitido de páginas"):
+        DocumentParser.parse(pdf_bytes, "too_many_pages.pdf")
+

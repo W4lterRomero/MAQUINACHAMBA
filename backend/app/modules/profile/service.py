@@ -78,8 +78,10 @@ class ProfileSourceService:
                 source_id=source.id,
                 name=es.name,
                 category=es.category,
-                proficiency=es.proficiency,
-                years_experience=es.years_experience,
+                proficiency=es.proficiency,  # None si no fue declarado
+                years_experience=es.years_experience,  # None si no fue declarado
+                source_fragment=es.source_fragment,
+                context_type=es.context_type,
                 verification_status="pending",  # Pendiente de revisión humana
             )
             session.add(skill)
@@ -88,11 +90,12 @@ class ProfileSourceService:
         # 6. Guardar experiencias extraídas con procedencia obligatoria y estado pending
         created_experiences = []
         for ee in extracted_doc.experiences:
-            # Parsear start_date y end_date a objetos date
-            try:
-                s_date = datetime.strptime(ee.start_date, "%Y-%m-%d").date()
-            except Exception:
-                s_date = datetime.now(timezone.utc).date()
+            s_date = None
+            if ee.start_date:
+                try:
+                    s_date = datetime.strptime(ee.start_date, "%Y-%m-%d").date()
+                except Exception:
+                    s_date = None
 
             e_date = None
             if ee.end_date:
@@ -109,6 +112,8 @@ class ProfileSourceService:
                 title=ee.title,
                 start_date=s_date,
                 end_date=e_date,
+                date_precision=ee.date_precision,
+                source_fragment=ee.source_fragment,
                 description=ee.description,
                 skills_used=ee.skills_used,
                 verification_status="pending",  # Pendiente de revisión humana
@@ -135,6 +140,8 @@ class ProfileSourceService:
                     "category": s.category,
                     "proficiency": s.proficiency,
                     "years_experience": s.years_experience,
+                    "source_fragment": s.source_fragment,
+                    "context_type": s.context_type,
                     "source_id": s.source_id,
                     "verification_status": s.verification_status,
                 }
@@ -145,8 +152,10 @@ class ProfileSourceService:
                     "id": e.id,
                     "company": e.company,
                     "title": e.title,
-                    "start_date": str(e.start_date),
+                    "start_date": str(e.start_date) if e.start_date else None,
                     "end_date": str(e.end_date) if e.end_date else None,
+                    "date_precision": e.date_precision,
+                    "source_fragment": e.source_fragment,
                     "description": e.description,
                     "source_id": e.source_id,
                     "verification_status": e.verification_status,
@@ -178,19 +187,23 @@ class ProfileSourceService:
             raise KeyError(f"Habilidad {skill_id} no encontrada en tenant {tenant_id}.")
 
         if decision == "accept":
+            # Conserva los valores reales extraídos sin inventar años ni niveles
             skill.verification_status = "verified"
         elif decision == "reject":
             skill.verification_status = "rejected"
         elif decision == "modify":
             if modifications:
-                if "name" in modifications and modifications["name"].strip():
+                if "name" in modifications and modifications["name"] and modifications["name"].strip():
                     skill.name = modifications["name"].strip()
                 if "category" in modifications:
                     skill.category = modifications["category"]
                 if "proficiency" in modifications:
                     skill.proficiency = modifications["proficiency"]
                 if "years_experience" in modifications:
-                    skill.years_experience = float(modifications["years_experience"])
+                    val = modifications["years_experience"]
+                    skill.years_experience = float(val) if val is not None else None
+                if "context_type" in modifications:
+                    skill.context_type = modifications["context_type"]
             skill.verification_status = "verified"
         else:
             raise ValueError(f"Decisión inválida '{decision}'. Opciones: accept, reject, modify.")
@@ -224,17 +237,20 @@ class ProfileSourceService:
             exp.verification_status = "rejected"
         elif decision == "modify":
             if modifications:
-                if "company" in modifications and modifications["company"].strip():
+                if "company" in modifications and modifications["company"] and modifications["company"].strip():
                     exp.company = modifications["company"].strip()
-                if "title" in modifications and modifications["title"].strip():
+                if "title" in modifications and modifications["title"] and modifications["title"].strip():
                     exp.title = modifications["title"].strip()
                 if "description" in modifications:
                     exp.description = modifications["description"]
-                if "start_date" in modifications and modifications["start_date"]:
-                    try:
-                        exp.start_date = datetime.strptime(modifications["start_date"], "%Y-%m-%d").date()
-                    except Exception:
-                        pass
+                if "start_date" in modifications:
+                    if modifications["start_date"]:
+                        try:
+                            exp.start_date = datetime.strptime(modifications["start_date"], "%Y-%m-%d").date()
+                        except Exception:
+                            pass
+                    else:
+                        exp.start_date = None
                 if "end_date" in modifications:
                     if modifications["end_date"]:
                         try:
@@ -243,6 +259,8 @@ class ProfileSourceService:
                             pass
                     else:
                         exp.end_date = None
+                if "date_precision" in modifications:
+                    exp.date_precision = modifications["date_precision"]
             exp.verification_status = "verified"
         else:
             raise ValueError(f"Decisión inválida '{decision}'. Opciones: accept, reject, modify.")
@@ -348,6 +366,8 @@ class ProfileSourceService:
                     "category": s.category,
                     "proficiency": s.proficiency,
                     "years_experience": s.years_experience,
+                    "source_fragment": s.source_fragment,
+                    "context_type": s.context_type,
                     "source_id": s.source_id,
                     "verification_status": s.verification_status,
                 }
@@ -358,8 +378,10 @@ class ProfileSourceService:
                     "id": e.id,
                     "company": e.company,
                     "title": e.title,
-                    "start_date": str(e.start_date),
+                    "start_date": str(e.start_date) if e.start_date else None,
                     "end_date": str(e.end_date) if e.end_date else None,
+                    "date_precision": e.date_precision,
+                    "source_fragment": e.source_fragment,
                     "description": e.description,
                     "source_id": e.source_id,
                     "verification_status": e.verification_status,

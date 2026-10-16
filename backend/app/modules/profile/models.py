@@ -82,8 +82,10 @@ class Skill(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     category: Mapped[str] = mapped_column(String(50), default="technical")
-    proficiency: Mapped[str] = mapped_column(String(20), default="intermediate")
-    years_experience: Mapped[float] = mapped_column(Float, default=1.0)
+    proficiency: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default=None)
+    years_experience: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
+    source_fragment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    context_type: Mapped[str] = mapped_column(String(30), default="declared")  # declared, interest, mention
     verification_status: Mapped[str] = mapped_column(
         String(20), default="pending"
     )  # pending, verified, rejected
@@ -102,8 +104,10 @@ class Experience(Base):
     )
     company: Mapped[str] = mapped_column(String(255), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    date_precision: Mapped[str] = mapped_column(String(20), default="day")  # day, month, year, unknown
+    source_fragment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     description: Mapped[str] = mapped_column(Text, default="")
     skills_used: Mapped[dict] = mapped_column(JSON, default=list)
     verification_status: Mapped[str] = mapped_column(

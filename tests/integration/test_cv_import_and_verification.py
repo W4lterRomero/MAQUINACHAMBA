@@ -401,3 +401,127 @@ async def test_upload_file_multipart_endpoint(client: AsyncClient):
     assert len(data["pending_skills"]) >= 2
     for s in data["pending_skills"]:
         assert s["verification_status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_negative_work_synthetic_api_flow(client: AsyncClient):
+    """
+    PRUEBA INTEGRAL END-TO-END DEL CASO NEGATIVO DE WORK:
+    'Persona ficticia\\nInteres en aprender Python. Sin experiencia laboral ni fechas declaradas.'
+    Garantía: Cero años/nivel/empleos inventados, TAMPOCO tras aceptar por el usuario.
+    """
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "work_negative@example.com",
+        "password": "PasswordNegative123!",
+        "full_name": "Persona ficticia",
+    })
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    await client.post("/api/v1/profile", json={
+        "full_name": "Persona ficticia",
+        "email": "work_negative@example.com",
+        "location_city": "Toluca",
+        "location_country": "México",
+    }, headers=headers)
+
+    # 1. Importar texto ficticio
+    text = "Persona ficticia\nInteres en aprender Python. Sin experiencia laboral ni fechas declaradas."
+    import_res = await client.post("/api/v1/profile/sources/import", json={
+        "filename": "cv_work_test.txt",
+        "raw_text": text,
+    }, headers=headers)
+    assert import_res.status_code == 201
+    data = import_res.json()
+
+    # CERO empleos inventados
+    assert len(data["pending_experiences"]) == 0
+
+    # Habilidades: Python con años=None y nivel=None
+    skills = data["pending_skills"]
+    assert len(skills) == 1
+    py = skills[0]
+    assert py["name"] == "Python"
+    assert py["years_experience"] is None, f"Se inventaron años: {py['years_experience']}"
+    assert py["proficiency"] is None, f"Se inventó nivel: {py['proficiency']}"
+    assert py["context_type"] == "interest"
+    assert py["verification_status"] == "pending"
+
+    # 2. ACEPTAR la habilidad
+    accept_res = await client.post(
+        f"/api/v1/profile/items/skills/{py['id']}/review",
+        json={"decision": "accept"},
+        headers=headers,
+    )
+    assert accept_res.status_code == 200
+    acc_data = accept_res.json()
+
+    # CRITERIO DE WORK: Cero años ni niveles inventados TAMPOCO tras aceptar
+    assert acc_data["verification_status"] == "verified"
+    assert acc_data["years_experience"] is None, f"Se inventaron años tras aceptar: {acc_data['years_experience']}"
+    assert acc_data["proficiency"] is None, f"Se inventó nivel tras aceptar: {acc_data['proficiency']}"
+
+
+@pytest.mark.asyncio
+async def test_upload_file_chunked_streaming_limit_rejection(client: AsyncClient):
+    """Verifica que el endpoint de carga rechace archivos que excedan 5 MB con lectura acotada."""
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "stream_user@example.com",
+        "password": "PasswordStream123!",
+        "full_name": "Stream User",
+    })
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    await client.post("/api/v1/profile", json={
+        "full_name": "Stream User",
+        "email": "stream_user@example.com",
+        "location_city": "Mérida",
+        "location_country": "México",
+    }, headers=headers)
+
+    # Crear 5 MB + 64 KB de datos
+    oversized = b"A" * (5 * 1024 * 1024 + 64 * 1024)
+    files = {"file": ("oversized_cv.txt", oversized, "text/plain")}
+
+    res = await client.post("/api/v1/profile/sources/upload", files=files, headers=headers)
+    assert res.status_code == 400
+    assert "excede el tamaño máximo" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_import_json_size_limit_rejection(client: AsyncClient):
+    """Verifica que el endpoint JSON rechace cadenas base64 o texto que excedan 5 MB previo a decodificar."""
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "json_limit_user@example.com",
+        "password": "PasswordJson123!",
+        "full_name": "Json Limit User",
+    })
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    await client.post("/api/v1/profile", json={
+        "full_name": "Json Limit User",
+        "email": "json_limit_user@example.com",
+        "location_city": "Cancún",
+        "location_country": "México",
+    }, headers=headers)
+
+    # 1. Base64 excesivo
+    oversized_b64 = "A" * (7 * 1024 * 1024)
+    res_b64 = await client.post("/api/v1/profile/sources/import", json={
+        "filename": "huge.pdf",
+        "content_base64": oversized_b64,
+    }, headers=headers)
+    assert res_b64.status_code == 400
+    assert "excede el tamaño máximo" in res_b64.json()["detail"]
+
+    # 2. Texto plano excesivo
+    oversized_text = "B" * (5 * 1024 * 1024 + 1024)
+    res_txt = await client.post("/api/v1/profile/sources/import", json={
+        "filename": "huge.txt",
+        "raw_text": oversized_text,
+    }, headers=headers)
+    assert res_txt.status_code == 400
+    assert "excede el tamaño máximo" in res_txt.json()["detail"]
+

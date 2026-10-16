@@ -1118,3 +1118,78 @@ graphify update .
 - **Graphify**: Grafo actualizado a **1085 nodos, 2086 aristas y 138 comunidades** (`graph.json`).
 - **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado; sin conexiones de red externas.
 
+
+## Work — b3f96d8, Hito 2.1: CORREGIR
+
+Se consultó Graphify y se revisaron parser, rutas de importación, servicio y migración. Reproducción independiente en copia temporal de backend, con texto ficticio: "Persona ficticia\nInteres en aprender Python. Sin experiencia laboral ni fechas declaradas.". El parser devolvió Python con 3.0 años/nivel intermediate y experiencia en "Empresa por verificar" desde 2022-01-01. Salida 0. No se reprodujo aquí la suite de 126 pruebas.
+
+P1 — No inventar hechos: KNOWN_SKILLS asigna años fijos, _extract_skills fija intermediate, y _extract_experiences fabrica un empleo y fecha si no reconoce experiencia. Pending no corrige la atribución falsa: accept la convierte en verified. Eliminar estos valores fabricados; conservar null/desconocido, no crear empleo sin evidencia y preservar precisión de fechas cuando solo existe año. Registrar fragmento o posición de origen de cada dato, distinguir menciones/intereses de experiencia declarada y exigir completar explícitamente campos faltantes cuando sean necesarios. Prueba negativa con el texto anterior: cero años/nivel/empleos inventados, tampoco tras aceptar.
+
+P1 — Límites reales del parser: upload usa await file.read() sin límite antes de validar 5 MB; JSON decodifica antes del límite; DOCX se descomprime y PDF se procesa sin límites de expansión/páginas/texto o tiempo. Aplicar lectura acotada y límites del cuerpo/JSON, inspección del ZIP antes de descomprimir (tamaño total, entradas y razón de compresión), y presupuesto de recursos del parser. Usar fixtures pequeños de alto ratio sin agotar recursos; no ejecutar archivos hostiles reales.
+
+Siguiente encargo: corregir esos dos puntos antes de dar por aceptado Hito 2.1. Añadir pruebas de datos ausentes/negados, fechas parciales, lectura limitada y contenedores que exceden límites; mantener aislamiento y revisión humana. No rehacer navegación/reloj/contador aceptados. La entrega es API/backend; no atribuir un flujo visual de importación revisado a Work. Actualizar Graphify y entregar evidencia nueva.
+
+### Confirmación de recepción y entrega de correcciones P1 para Hito 2.1 — 2026-10-16
+
+Se confirma formalmente la recepción y lectura del dictamen independiente de Work sobre `b3f96d8` (Hito 2.1: CORREGIR).
+Builder atendió en su totalidad y de forma verificable los dos señalamientos P1:
+
+#### 1. Eliminación total de hechos inventados (P1: Cero años, niveles ni empleos fabricados)
+- **Eliminación de años y niveles fijos en diccionario (`parser.py`)**:
+  * Sustituido `KNOWN_SKILLS` por `KNOWN_SKILL_CATEGORIES`, que mapea únicamente tecnologías reconocidas a su categoría (`technical`, `soft`, `language`).
+  * Los campos `proficiency` y `years_experience` en `ExtractedSkill` inicializan como `None` por defecto. NUNCA se les asigna `intermediate`, `3.0` ni `1.0`.
+  * Si los años o el nivel no están explícitamente declarados en la oración o contexto local del documento, permanecen estrictamente como `None`.
+- **Distinción de menciones e intereses frente a experiencia declarada**:
+  * Se implementó detección contextual (`INTEREST_OR_NEGATION_PATTERN`) que clasifica como `context_type="interest"` cualquier mención que contenga frases como `"interés en aprender"`, `"deseo aprender"`, `"sin experiencia"`, `"aspirante"`, `"learning"`, etc.
+  * Se registra el fragmento textual de procedencia (`source_fragment`) para trazabilidad de cada dato extraído.
+- **Eliminación total de empleos fabricados**:
+  * Se eliminó por completo el bloque fallback que inventaba `"Empresa por verificar"` con fecha `"2022-01-01"`.
+  * Detección de patrones explícitos de negación de experiencia (`EXPLICIT_NO_EXPERIENCE_PATTERN` como `"sin experiencia laboral"`), retornando lista vacía `[]`.
+  * Si un documento no contiene bloques comprobables de empleo con empresa y fechas, el parser retorna `experiences = []`. CERO empleos inventados.
+- **Preservación de precisión en fechas**:
+  * Soporte para `date_precision` (`"year"`, `"month"`, `"day"`): cuando solo existe año (e.g. `2020 - 2023`), se registra `date_precision="year"`; cuando existe mes y año, `date_precision="month"`.
+- **Garantía al aceptar en revisión humana (`service.py`)**:
+  * Si el usuario ejecuta `decision="accept"`, la habilidad o experiencia pasa a `verified` conservando los valores reales extraídos (`years_experience=None`, `proficiency=None`). NUNCA se rellenan con valores por defecto. Si el usuario desea completarlos, utiliza `decision="modify"`.
+- **Migración versionada con Alembic**:
+  * Creada y aplicada `migrations/versions/229e21e37323_add_provenance_precision_and_fragment_.py` añadiendo `source_fragment`, `context_type`, `date_precision` y columnas `nullable`.
+
+#### 2. Presupuestos estrictos de recursos y límites reales del parser (P1: Defensas contra bombas de descompresión y DoS)
+- **Lectura acotada en streaming en carga multipart (`/sources/upload` en `api/profile.py`)**:
+  * Se reemplazó `await file.read()` sin límites por una lectura acotada en chunks de 64 KB con acumulador.
+  * Si el flujo supera `MAX_CV_FILE_SIZE` (5 MB), la lectura se interrumpe inmediatamente y levanta `HTTPException(400)` sin consumir memoria adicional en el servidor.
+- **Límites previos a la decodificación en endpoint JSON (`/sources/import`)**:
+  * Comprobación de longitud previa de la cadena base64 (`len(payload.content_base64) > max_b64_len`), rechazando con 400 antes de intentar decodificar.
+  * Comprobación de tamaño previo en texto plano (`len(raw_text.encode('utf-8')) > 5 MB`).
+- **Inspección de contenedor ZIP antes de descomprimir (`DocumentParser._inspect_zip_limits`)**:
+  * Previo a pasar el archivo a `docx.Document` o leer `document.xml`, se inspecciona el directorio central del ZIP sin descomprimir:
+    - `MAX_ZIP_ENTRIES = 500`: Rechaza si contiene más de 500 entradas.
+    - `MAX_ZIP_DECOMPRESSED_SIZE = 20 MB`: Rechaza si la suma de tamaños no comprimidos supera 20 MB.
+    - `MAX_ZIP_ENTRY_SIZE = 10 MB`: Rechaza entradas individuales mayores a 10 MB.
+    - `MAX_ZIP_COMPRESSION_RATIO = 100.0`: Calcula el ratio `file_size / compress_size` de cada entrada; rechaza con `InvalidDocumentError` ante ratios sospechosos (prevención de zip bombs).
+- **Presupuesto de recursos en PDF (`_extract_pdf`)**:
+  * `MAX_PDF_PAGES = 50`: Rechaza documentos con más de 50 páginas.
+  * `MAX_EXTRACTED_TEXT_LENGTH = 1_000_000` (1 MB de caracteres): Límite acumulativo de extracción para evitar agotamiento de memoria.
+
+#### 3. Pruebas y evidencias añadidas
+- **Prueba negativa con el texto exacto de Work (`test_negative_work_synthetic_no_invented_facts` y `test_negative_work_synthetic_api_flow`)**:
+  * Texto: `"Persona ficticia\nInteres en aprender Python. Sin experiencia laboral ni fechas declaradas."`
+  * Resultado: Python extraído con `years_experience=None`, `proficiency=None`, `context_type="interest"`; `experiences=[]`.
+  * Tras aceptación humana (`POST /review` con `decision="accept"`): `verification_status="verified"`, conservando `years_experience=None` y `proficiency=None`. Cero hechos inventados antes y después de aceptar.
+- **Pruebas de precisión de fechas y negación explícita (`test_date_precision_preservation_and_explicit_no_experience`)**:
+  * Verifica `date_precision="year"` ante años solos, `date_precision="month"` ante mes/año, y `experiences=[]` ante `"Sin experiencia laboral"`.
+- **Pruebas de límites de contenedores y recursos**:
+  * `test_zip_bomb_high_compression_ratio_rejected`: Fixture sintético de 200 KB comprimido a < 200 bytes rechazado por ratio > 100x sin descomprimir.
+  * `test_zip_too_many_entries_rejected`: Fixture con 505 entradas rechazado por superar 500 entradas.
+  * `test_zip_decompressed_size_exceeded_rejected`: Contenedor > 20 MB rechazado.
+  * `test_pdf_too_many_pages_rejected`: PDF con 55 páginas rechazado por presupuesto de páginas.
+  * `test_upload_file_chunked_streaming_limit_rejection`: Archivo multipart > 5 MB rechazado con lectura acotada (400).
+  * `test_import_json_size_limit_rejection`: Base64 y texto > 5 MB rechazados previo a decodificación (400).
+
+#### 4. Resultados reproducibles
+- **Suite unitaria de parser (`tests/unit/test_cv_document_parser.py`)**: 16 pruebas pasadas en 0.39s.
+- **Suite de integración de importación y verificación (`tests/integration/test_cv_import_and_verification.py`)**: 8 pruebas pasadas en 4.70s.
+- **Suite completa del repositorio**: **135 pruebas pasadas, 24 subpruebas pasadas** en 23.68s (`PYTHONPATH=. venv/bin/pytest tests/ -v`).
+- **Control de secretos**: 0 secretos detectados (`venv/bin/python scripts/check_secrets.py backend/app frontend/src scripts`).
+- **Graphify**: Grafo actualizado a **1110 nodos, 2122 aristas y 134 comunidades** (`graph.json`).
+- **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado; alcance exclusivo backend/API.
+

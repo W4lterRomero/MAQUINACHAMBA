@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import get_session, get_tenant_id
 from backend.app.modules.profile.models import UserProfile, Skill, Experience, ProfessionalSource
-from backend.app.modules.profile.parser import InvalidDocumentError
+from backend.app.modules.profile.parser import InvalidDocumentError, MAX_CV_FILE_SIZE
 from backend.app.modules.profile.service import ProfileSourceService
 from backend.app.modules.cv.models import MasterCV
 
@@ -23,8 +23,8 @@ router = APIRouter(prefix="/profile", tags=["Profile"])
 class SkillCreate(BaseModel):
     name: str
     category: str = "technical"
-    proficiency: str = "intermediate"
-    years_experience: float = 1.0
+    proficiency: Optional[str] = None
+    years_experience: Optional[float] = None
     verification_status: str = "pending"  # pending, verified, rejected
 
 
@@ -252,6 +252,7 @@ async def upload_cv_document(
 ):
     """
     Importa un archivo de CV (PDF, DOCX, TXT) mediante multipart/form-data.
+    Aplica lectura acotada en streaming para prevenir agotamiento de memoria (P1).
     Extrae entidades con estado 'pending' y procedencia vinculada (Hito 2.1).
     """
     p_res = await session.execute(
@@ -261,7 +262,21 @@ async def upload_cv_document(
     if not profile:
         raise HTTPException(status_code=404, detail="Perfil no configurado. Cree el perfil primero.")
 
-    file_bytes = await file.read()
+    # Lectura acotada en chunks de 64 KB (máximo 5 MB en total)
+    chunk_size = 64 * 1024
+    buffer = bytearray()
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        buffer.extend(chunk)
+        if len(buffer) > MAX_CV_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El archivo excede el tamaño máximo permitido de 5 MB ({len(buffer)} bytes).",
+            )
+
+    file_bytes = bytes(buffer)
     try:
         result = await ProfileSourceService.import_cv_document(
             session=session,
@@ -286,6 +301,7 @@ async def import_cv_json(
 ):
     """
     Importa un documento de CV a través de JSON (base64 o texto plano).
+    Aplica límites estrictos de tamaño previo a la decodificación (P1).
     """
     p_res = await session.execute(
         select(UserProfile).where(UserProfile.tenant_id == tenant_id)
@@ -295,12 +311,23 @@ async def import_cv_json(
         raise HTTPException(status_code=404, detail="Perfil no configurado. Cree el perfil primero.")
 
     if payload.content_base64:
+        # Límite previo en longitud de la cadena base64: 5 MB en base64 son ~6.7 MB
+        max_b64_len = (MAX_CV_FILE_SIZE * 4 // 3) + 1024
+        if len(payload.content_base64) > max_b64_len:
+            raise HTTPException(
+                status_code=400,
+                detail="El contenido base64 excede el tamaño máximo permitido de 5 MB.",
+            )
         try:
             file_bytes = base64.b64decode(payload.content_base64)
         except Exception:
             raise HTTPException(status_code=400, detail="Formato base64 inválido.")
+        if len(file_bytes) > MAX_CV_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="El archivo excede el tamaño máximo permitido de 5 MB.")
     elif payload.raw_text is not None:
         file_bytes = payload.raw_text.encode("utf-8")
+        if len(file_bytes) > MAX_CV_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="El texto excede el tamaño máximo permitido de 5 MB.")
     else:
         raise HTTPException(status_code=400, detail="Debe proporcionar content_base64 o raw_text.")
 
