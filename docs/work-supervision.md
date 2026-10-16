@@ -1253,3 +1253,92 @@ Recepción confirmada del dictamen de Work sobre el commit `0f519a7`. Se atendie
 - **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado.
 - **Estado de Hito 2.1**: Se mantiene abierto para revisión y verificación independiente de Work; no se declara cerrado ni se habilita importación de documentos no confiables como función validada todavía.
 
+
+## Dirección del propietario — 16 octubre 2026: priorizar funciones utilizables
+
+El usuario pide continuar el software sin ciclos repetidos de informes de cierre. Prioridad autorizada: interfaz de importación PDF/DOCX/TXT, progreso y errores, revisión de cada dato con origen, corrección/aceptación/rechazo y perfil verificado; después creación, edición y selección de CV maestros especializados. Pruebas proporcionales junto con la implementación; no esperar confirmación rutinaria ni otro documento para avanzar localmente. Mantener Graphify y sus exclusiones, simulación y restricciones de acciones externas.
+
+Work observa modificaciones locales en API, parser e interfaz y nueva prueba de importación/revisión. No se sobrescribe ese trabajo ni se declara validado mientras está en curso. Entrega siguiente: función utilizable e instrucciones breves para abrirla; corregir defectos concretos dentro de la misma entrega. Los dictámenes previos conservan su alcance, pero no bloquean el desarrollo paralelo de la interfaz autorizada.
+
+## Builder — Entrega funcional: Interfaz de importación y revisión de CV, y gestión de CVs maestros especializados — 16 octubre 2026
+
+En atención directa a la instrucción del propietario y en coordinación con la supervisión de Work, se entrega la funcionalidad utilizable de importación, revisión humana de datos extraídos y gestión de CVs maestros especializados, conectada de extremo a extremo con el backend existente, manteniendo simulación estricta, aislamiento de tenant y sin invención de hechos:
+
+### 1. Funcionalidad Implementada
+
+1. **Pantalla de Importación y Revisión Humana de CV (`#tab-cv-import` en `backend/app/static/index.html`)**:
+   - **Carga de archivos PDF, DOCX y TXT**:
+     * Zona drag-and-drop interactiva y selector de archivos (`#dropZoneCV`, `#fileCVInput`), con validación de extensiones y límite estricto de 5 MB.
+     * Alternativa de extracción rápida desde texto plano pegado directamente (`#txtCVRawContent`).
+     * Barra de progreso visual animada (`#cvUploadProgressBar`) con porcentaje y estado descriptivo.
+     * Alertas claras de error en interfaz (`#cvUploadError`) ante formatos inválidos, documentos corruptos o violaciones de límites (HTTP 413 / 400).
+   - **Trazabilidad y procedencia de datos extraídos**:
+     * Visualización de datos de contacto sugeridos con botón para aplicarlos automáticamente al perfil.
+     * Listado de habilidades y experiencias laborales extraídas en estado `pending`.
+     * Cada elemento muestra su fragmento textual exacto de procedencia (`source_fragment`) en una caja de cita destacada (`.quote-box`).
+   - **Revisión humana obligatoria sin inventar información**:
+     * **[✓ Aceptar]**: Transiciona el elemento a `verified` preservando exactamente los valores extraídos (sin rellenar años ni niveles no declarados).
+     * **[✎ Modificar]**: Abre modales dedicados (`#modalEditSkill`, `#modalEditExperience`) para que el usuario corrija o complete nombre, categoría, nivel o fechas con precisión de año/mes/día.
+     * **[✗ Rechazar]**: Transiciona a `rejected`, quedando definitivamente excluido del perfil profesional consolidado.
+   - **Verificación de Perfil**:
+     * Botón `✓ Marcar Perfil Verificado` (`#btnMarkProfileVerified`) conectado a `POST /api/v1/profile/verify`.
+     * El perfil consolidado (`GET /api/v1/profile`) filtra y entrega exclusivamente habilidades y experiencias con estado `verified`.
+
+2. **Pantalla y Gestión de CVs Maestros Especializados (`#tab-master-cvs` en `backend/app/static/index.html`)**:
+   - **Formulario de Creación y Edición (`#frmMasterCVForm`)**:
+     * Campos de nombre, especialización, plantilla visual (`modern_clean`, `executive_ats`, `minimal_tech`) y resumen profesional.
+     * Selector dinámico con checkboxes de las habilidades verificadas del usuario para personalizar qué competencias se incluyen en cada versión curricular.
+   - **Listado y Operaciones de CVs Maestros (`#masterCVsCardsContainer`)**:
+     * Tarjetas con indicador visual de estado activo (`★ Activo`), plantilla y versión incremental (`v1`, `v2`).
+     * **[★ Activar]**: Selecciona el CV maestro activo para las evaluaciones de vacantes (`POST /api/v1/profile/cv/{id}/select`).
+     * **[👁 Inspeccionar]**: Modal de detalle (`#modalMasterCvDetail`) que visualiza el resumen, plantilla y todas las habilidades y experiencias verificadas vinculadas.
+     * **[✎ Editar]**: Carga datos en el formulario y actualiza vía `PUT /api/v1/profile/cv/{id}`, incrementando automáticamente el número de versión.
+     * **[🗑 Eliminar]**: Eliminación segura con confirmación (`DELETE /api/v1/profile/cv/{id}`).
+
+3. **Endpoints de API Robustecidos (`backend/app/api/profile.py`)**:
+   - `GET /api/v1/profile/cv`: Lista todos los CVs maestros del tenant.
+   - `GET /api/v1/profile/cv/{cv_id}`: Retorna detalle del CV maestro junto a sus habilidades y experiencias verificadas asociadas.
+   - `PUT /api/v1/profile/cv/{cv_id}`: Actualización con incremento de versión (REQ-004).
+   - `DELETE /api/v1/profile/cv/{cv_id}`: Eliminación en el tenant.
+   - `POST /api/v1/profile/cv/{cv_id}/select`: Activación exclusiva del CV maestro.
+   - `POST /api/v1/profile/verify`: Transición del perfil a estado verificado.
+   - Flexibilización de esquemas en `CVImportJsonRequest` (soporta `filename` y `source_name` con fallback) y `ProfileCreateOrUpdate`.
+   - Inclusión de tecnologías adicionales (`rust`, `go`, `golang`, `java`) en el diccionario del parser (`KNOWN_SKILL_CATEGORIES`).
+
+### 2. Instrucciones para Abrir y Usar la Interfaz
+
+```bash
+# 1. Iniciar el servidor local (FastAPI + Uvicorn)
+PYTHONPATH=. venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+
+# 2. Abrir en el navegador:
+# URL: http://127.0.0.1:8000/app (o http://127.0.0.1:8000/)
+
+# 3. Flujo en la interfaz:
+# a) Iniciar sesión o crear cuenta local rápida en el modal inicial.
+# b) Ir a la pestaña "Importar y Revisar CV":
+#    - Arrastrar un archivo PDF, DOCX o TXT (o usar "Pegar Texto").
+#    - Hacer clic en "Subir y Extraer" para ver la barra de progreso y extracción.
+#    - En el panel derecho, revisar cada habilidad y experiencia laboral:
+#      * Hacer clic en "✓ Aceptar", "✎ Modificar" o "✗ Rechazar".
+#      * Observar cómo el fragmento original de procedencia se visualiza en la caja de cita.
+#    - Hacer clic en "✓ Marcar Perfil Verificado".
+# c) Ir a la pestaña "CVs Maestros":
+#    - Crear uno o varios CVs especializados (ej. "CV Backend", "CV DevOps").
+#    - Seleccionar qué habilidades verificadas incluir y elegir la plantilla visual.
+#    - Usar "★ Activar" para definir cuál se usará en las postulaciones.
+```
+
+### 3. Pruebas y Verificaciones Realizadas
+
+- **Suite de pruebas de integración de la nueva interfaz (`tests/integration/test_cv_import_and_review_ui.py`)**:
+  * `test_ui_html_served_with_cv_import_and_master_cv_elements`: Valida presencia en DOM de todas las pestañas, modales, zonas de carga y botones servidos por FastAPI.
+  * `test_cv_import_and_human_review_workflow`: Valida flujo completo de importación, revisión (aceptación sin inventar datos, modificación con valores humanos, rechazo con exclusión), marcado de perfil verificado y consulta consolidada.
+  * `test_master_cv_crud_and_selection_lifecycle`: Valida CRUD, versionado incremental, activación y detalle de CVs maestros.
+  * `test_tenant_isolation_on_master_cv_and_review`: Valida aislamiento estricto por `tenant_id` (rechazo 404 ante intentos de acceso cruzado entre tenants).
+  * **Resultado**: 4 pasadas en 2.57s.
+- **Suite completa del repositorio**: **147 pasadas, 24 subpruebas pasadas** en 28.81s (`PYTHONPATH=. venv/bin/pytest tests/ -q`).
+- **Demostración integral E2E (`scripts/demo_e2e_walkthrough.py`)**: Ejecutada con éxito (código de salida 0), incluyendo navegación real en Chrome sin errores de consola, bucle continuo de demonio con reloj controlable y recuperación tras `SIGKILL`.
+- **Control de secretos**: 0 secretos detectados en código fuente de la aplicación (`venv/bin/python scripts/check_secrets.py backend/app frontend/src scripts`).
+- **Graphify**: Grafo actualizado a **1177 nodos, 2215 aristas y 139 comunidades** (`graphify update .`).
+- **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado.

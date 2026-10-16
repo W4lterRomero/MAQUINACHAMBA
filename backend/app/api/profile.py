@@ -34,7 +34,8 @@ class ItemReviewRequest(BaseModel):
 
 
 class CVImportJsonRequest(BaseModel):
-    filename: str
+    filename: Optional[str] = None
+    source_name: Optional[str] = None
     content_base64: Optional[str] = None
     raw_text: Optional[str] = None
 
@@ -47,16 +48,27 @@ class MasterCVCreate(BaseModel):
     sections: Dict[str, Any] = {}
 
 
+class MasterCVUpdate(BaseModel):
+    name: Optional[str] = None
+    specialization: Optional[str] = None
+    summary: Optional[str] = None
+    template_id: Optional[str] = None
+    sections: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+
 class ProfileCreateOrUpdate(BaseModel):
     full_name: str
     email: str
     phone: Optional[str] = None
-    location_city: str
-    location_country: str
+    location_city: Optional[str] = "No especificada"
+    location_country: Optional[str] = "No especificado"
     work_countries: List[str] = []
     availability: str = "immediate"
     job_preferences: Dict[str, Any] = {}
     languages: List[Dict[str, str]] = []
+    verification_status: Optional[str] = None
 
 
 @router.post("", status_code=status.HTTP_200_OK)
@@ -70,6 +82,8 @@ async def create_or_update_profile(
     res = await session.execute(stmt)
     profile = res.scalar_one_or_none()
 
+    init_status = payload.verification_status or "pending"
+
     if profile is None:
         profile = UserProfile(
             tenant_id=tenant_id,
@@ -82,7 +96,7 @@ async def create_or_update_profile(
             availability=payload.availability,
             job_preferences=payload.job_preferences,
             languages=payload.languages,
-            verification_status="pending",
+            verification_status=init_status,
         )
         session.add(profile)
     else:
@@ -95,6 +109,8 @@ async def create_or_update_profile(
         profile.availability = payload.availability
         profile.job_preferences = payload.job_preferences
         profile.languages = payload.languages
+        if payload.verification_status:
+            profile.verification_status = payload.verification_status
 
     await session.commit()
     await session.refresh(profile)
@@ -114,7 +130,7 @@ async def get_profile(
     session: AsyncSession = Depends(get_session),
     tenant_id: str = Depends(get_tenant_id),
 ):
-    """Obtiene el perfil central junto a sus habilidades y CVs maestros."""
+    """Obtiene el perfil central junto a sus habilidades, experiencias y CVs maestros."""
     p_res = await session.execute(
         select(UserProfile).where(UserProfile.tenant_id == tenant_id)
     )
@@ -123,9 +139,26 @@ async def get_profile(
         raise HTTPException(status_code=404, detail="Perfil no configurado para este tenant.")
 
     s_res = await session.execute(
-        select(Skill).where(Skill.profile_id == profile.id, Skill.tenant_id == tenant_id)
+        select(Skill).where(
+            and_(
+                Skill.profile_id == profile.id,
+                Skill.tenant_id == tenant_id,
+                Skill.verification_status == "verified",
+            )
+        )
     )
     skills = s_res.scalars().all()
+
+    e_res = await session.execute(
+        select(Experience).where(
+            and_(
+                Experience.profile_id == profile.id,
+                Experience.tenant_id == tenant_id,
+                Experience.verification_status == "verified",
+            )
+        )
+    )
+    experiences = e_res.scalars().all()
 
     cv_res = await session.execute(
         select(MasterCV).where(MasterCV.profile_id == profile.id, MasterCV.tenant_id == tenant_id)
@@ -151,9 +184,24 @@ async def get_profile(
                 "category": s.category,
                 "proficiency": s.proficiency,
                 "years_experience": s.years_experience,
+                "source_fragment": s.source_fragment,
                 "verification_status": s.verification_status,
             }
             for s in skills
+        ],
+        "experiences": [
+            {
+                "id": e.id,
+                "company": e.company,
+                "title": e.title,
+                "start_date": str(e.start_date) if e.start_date else None,
+                "end_date": str(e.end_date) if e.end_date else None,
+                "date_precision": e.date_precision,
+                "description": e.description,
+                "source_fragment": e.source_fragment,
+                "verification_status": e.verification_status,
+            }
+            for e in experiences
         ],
         "master_cvs": [
             {
@@ -161,6 +209,9 @@ async def get_profile(
                 "name": c.name,
                 "specialization": c.specialization,
                 "summary": c.summary,
+                "template_id": c.template_id,
+                "sections": c.sections or {},
+                "is_active": c.is_active,
                 "version": c.version,
             }
             for c in cvs
@@ -236,8 +287,197 @@ async def create_master_cv(
         "name": cv.name,
         "specialization": cv.specialization,
         "summary": cv.summary,
+        "template_id": cv.template_id,
+        "sections": cv.sections or {},
+        "is_active": cv.is_active,
         "version": cv.version,
     }
+
+
+@router.get("/cv", status_code=status.HTTP_200_OK)
+async def list_master_cvs(
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Lista todos los CVs maestros especializados del tenant."""
+    stmt = select(MasterCV).where(MasterCV.tenant_id == tenant_id).order_by(MasterCV.created_at.desc())
+    res = await session.execute(stmt)
+    cvs = res.scalars().all()
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "specialization": c.specialization,
+            "summary": c.summary,
+            "template_id": c.template_id,
+            "sections": c.sections or {},
+            "is_active": c.is_active,
+            "version": c.version,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in cvs
+    ]
+
+
+@router.get("/cv/{cv_id}", status_code=status.HTTP_200_OK)
+async def get_master_cv_detail(
+    cv_id: str,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Obtiene el detalle de un CV maestro con sus habilidades y experiencias verificadas vinculadas."""
+    stmt = select(MasterCV).where(and_(MasterCV.id == cv_id, MasterCV.tenant_id == tenant_id))
+    res = await session.execute(stmt)
+    cv = res.scalar_one_or_none()
+    if not cv:
+        raise HTTPException(status_code=404, detail="CV Maestro no encontrado.")
+
+    s_stmt = select(Skill).where(and_(Skill.profile_id == cv.profile_id, Skill.tenant_id == tenant_id, Skill.verification_status == "verified"))
+    s_res = await session.execute(s_stmt)
+    skills = s_res.scalars().all()
+
+    e_stmt = select(Experience).where(and_(Experience.profile_id == cv.profile_id, Experience.tenant_id == tenant_id, Experience.verification_status == "verified"))
+    e_res = await session.execute(e_stmt)
+    experiences = e_res.scalars().all()
+
+    return {
+        "cv": {
+            "id": cv.id,
+            "name": cv.name,
+            "specialization": cv.specialization,
+            "summary": cv.summary,
+            "template_id": cv.template_id,
+            "sections": cv.sections or {},
+            "is_active": cv.is_active,
+            "version": cv.version,
+        },
+        "verified_skills": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "category": s.category,
+                "proficiency": s.proficiency,
+                "years_experience": s.years_experience,
+                "source_fragment": s.source_fragment,
+            }
+            for s in skills
+        ],
+        "verified_experiences": [
+            {
+                "id": e.id,
+                "company": e.company,
+                "title": e.title,
+                "start_date": str(e.start_date) if e.start_date else None,
+                "end_date": str(e.end_date) if e.end_date else None,
+                "date_precision": e.date_precision,
+                "description": e.description,
+                "source_fragment": e.source_fragment,
+            }
+            for e in experiences
+        ],
+    }
+
+
+@router.put("/cv/{cv_id}", status_code=status.HTTP_200_OK)
+async def update_master_cv(
+    cv_id: str,
+    payload: MasterCVUpdate,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Actualiza un CV maestro especializado e incrementa su versión (REQ-004)."""
+    stmt = select(MasterCV).where(and_(MasterCV.id == cv_id, MasterCV.tenant_id == tenant_id))
+    res = await session.execute(stmt)
+    cv = res.scalar_one_or_none()
+    if not cv:
+        raise HTTPException(status_code=404, detail="CV Maestro no encontrado.")
+
+    if payload.name is not None and payload.name.strip():
+        cv.name = payload.name.strip()
+    if payload.specialization is not None and payload.specialization.strip():
+        cv.specialization = payload.specialization.strip()
+    if payload.summary is not None:
+        cv.summary = payload.summary.strip()
+    if payload.template_id is not None:
+        cv.template_id = payload.template_id
+    if payload.sections is not None:
+        cv.sections = payload.sections
+    if payload.is_active is not None:
+        cv.is_active = payload.is_active
+
+    cv.version += 1
+    await session.commit()
+    await session.refresh(cv)
+    return {
+        "id": cv.id,
+        "name": cv.name,
+        "specialization": cv.specialization,
+        "summary": cv.summary,
+        "template_id": cv.template_id,
+        "sections": cv.sections,
+        "is_active": cv.is_active,
+        "version": cv.version,
+    }
+
+
+@router.delete("/cv/{cv_id}", status_code=status.HTTP_200_OK)
+async def delete_master_cv(
+    cv_id: str,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Elimina un CV maestro especializado del tenant."""
+    stmt = select(MasterCV).where(and_(MasterCV.id == cv_id, MasterCV.tenant_id == tenant_id))
+    res = await session.execute(stmt)
+    cv = res.scalar_one_or_none()
+    if not cv:
+        raise HTTPException(status_code=404, detail="CV Maestro no encontrado.")
+
+    await session.delete(cv)
+    await session.commit()
+    return {"status": "deleted", "id": cv_id}
+
+
+@router.post("/cv/{cv_id}/select", status_code=status.HTTP_200_OK)
+async def select_master_cv(
+    cv_id: str,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Marca un CV maestro como el activo para candidaturas y desactiva los demás."""
+    stmt = select(MasterCV).where(and_(MasterCV.id == cv_id, MasterCV.tenant_id == tenant_id))
+    res = await session.execute(stmt)
+    cv = res.scalar_one_or_none()
+    if not cv:
+        raise HTTPException(status_code=404, detail="CV Maestro no encontrado.")
+
+    all_stmt = select(MasterCV).where(and_(MasterCV.tenant_id == tenant_id, MasterCV.profile_id == cv.profile_id))
+    all_res = await session.execute(all_stmt)
+    for other_cv in all_res.scalars().all():
+        other_cv.is_active = (other_cv.id == cv_id)
+
+    await session.commit()
+    await session.refresh(cv)
+    return {"status": "active", "id": cv.id, "name": cv.name}
+
+
+@router.post("/verify", status_code=status.HTTP_200_OK)
+async def mark_profile_verified(
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Marca el perfil como verificado tras revisión humana satisfactoria."""
+    stmt = select(UserProfile).where(UserProfile.tenant_id == tenant_id)
+    res = await session.execute(stmt)
+    profile = res.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil no configurado.")
+    profile.verification_status = "verified"
+    await session.commit()
+    await session.refresh(profile)
+    return {"status": "verified", "profile_id": profile.id}
+
 
 
 # ==============================================================================
@@ -336,7 +576,7 @@ async def import_cv_json(
             session=session,
             tenant_id=tenant_id,
             profile_id=profile.id,
-            filename=payload.filename,
+            filename=payload.filename or payload.source_name or "cv_document.txt",
             file_bytes=file_bytes,
         )
         await session.commit()

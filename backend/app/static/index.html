@@ -29,8 +29,8 @@
     .user-info { display: flex; align-items: center; gap: 1rem; font-size: 0.875rem; color: var(--text-muted); }
     .user-info strong { color: var(--text); }
     
-    nav { background-color: #131c2e; border-bottom: 1px solid var(--card-border); display: flex; padding: 0 2rem; gap: 0.5rem; }
-    nav button { background: none; border: none; color: var(--text-muted); padding: 0.75rem 1.25rem; font-size: 0.95rem; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    nav { background-color: #131c2e; border-bottom: 1px solid var(--card-border); display: flex; padding: 0 2rem; gap: 0.5rem; overflow-x: auto; }
+    nav button { background: none; border: none; color: var(--text-muted); padding: 0.75rem 1.25rem; font-size: 0.95rem; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; }
     nav button:hover { color: var(--text); }
     nav button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 
@@ -58,6 +58,7 @@
     .btn-outline { background: transparent; border: 1px solid var(--card-border); color: var(--text); }
     .btn-outline:hover { background: #334155; }
     .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .kanban-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; overflow-x: auto; }
     .kanban-col { background: #131c2e; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1rem; min-height: 400px; display: flex; flex-direction: column; }
@@ -70,7 +71,9 @@
     .badge-pending { background: #854d0e; color: #fef08a; }
     .badge-scheduled { background: #1e3a8a; color: #bfdbfe; }
     .badge-confirmed { background: #064e3b; color: #a7f3d0; }
+    .badge-verified { background: #064e3b; color: #a7f3d0; }
     .badge-danger { background: #7f1d1d; color: #fecaca; }
+    .badge-rejected { background: #7f1d1d; color: #fecaca; }
 
     table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
     th, td { text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid var(--card-border); }
@@ -81,6 +84,69 @@
     .toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: #1e293b; border: 1px solid var(--primary); color: white; padding: 0.75rem 1.25rem; border-radius: 0.375rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 100; font-size: 0.9rem; display: none; }
     .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); display: flex; align-items: center; justify-content: center; z-index: 50; }
     .modal { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 0.75rem; width: 95%; max-width: 600px; max-height: 90vh; overflow-y: auto; padding: 1.75rem; }
+
+    /* Estilos específicos para Importación y Revisión de CV */
+    .upload-zone {
+      border: 2px dashed var(--card-border);
+      border-radius: 0.5rem;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      background: #0f172a;
+      cursor: pointer;
+      transition: border-color 0.2s, background-color 0.2s;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--primary);
+      background-color: rgba(59, 130, 246, 0.05);
+    }
+    .quote-box {
+      border-left: 3px solid var(--primary);
+      background: #0b1220;
+      padding: 0.45rem 0.7rem;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.78rem;
+      color: #93c5fd;
+      border-radius: 0.25rem;
+      margin-top: 0.35rem;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+    .item-review-card {
+      background: #131c2e;
+      border: 1px solid var(--card-border);
+      border-radius: 0.5rem;
+      padding: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      transition: border-color 0.15s;
+    }
+    .item-review-card:hover {
+      border-color: var(--primary);
+    }
+    .item-review-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .item-review-actions {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: flex-end;
+      margin-top: 0.4rem;
+    }
+    .master-cv-card {
+      background: #131c2e;
+      border: 1px solid var(--card-border);
+      border-radius: 0.5rem;
+      padding: 1.25rem;
+      margin-bottom: 0.75rem;
+      transition: border-color 0.15s;
+    }
+    .master-cv-card.active-cv {
+      border-color: #f59e0b;
+      box-shadow: 0 0 0 1px #f59e0b;
+    }
   </style>
 </head>
 <body>
@@ -99,6 +165,8 @@
 
   <nav>
     <button data-tab="tab-profile" id="nav-tab-profile" class="active" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
+    <button data-tab="tab-cv-import" id="nav-tab-cv-import" onclick="switchTab('tab-cv-import')">Importar y Revisar CV</button>
+    <button data-tab="tab-master-cvs" id="nav-tab-master-cvs" onclick="switchTab('tab-master-cvs')">CVs Maestros</button>
     <button data-tab="tab-vacancies" id="nav-tab-vacancies" onclick="switchTab('tab-vacancies')">Vacantes e Importación</button>
     <button data-tab="tab-approvals" id="nav-tab-approvals" onclick="switchTab('tab-approvals')">Revisión y Aprobaciones</button>
     <button data-tab="tab-crm" id="nav-tab-crm" onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
@@ -142,7 +210,10 @@
                 <option value="1_month">1 mes</option>
               </select>
             </div>
-            <button type="submit" class="btn btn-primary">Guardar Perfil</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+              <button type="submit" class="btn btn-primary">Guardar Perfil</button>
+              <span id="lblProfileVerificationStatus" class="badge badge-pending">No verificado</span>
+            </div>
           </form>
         </div>
 
@@ -179,9 +250,166 @@
             <div class="form-group">
               <input type="text" id="cvSpecialization" required placeholder="Especialización (ej. Backend Developer)">
             </div>
-            <button type="submit" class="btn btn-outline btn-sm">Crear CV Maestro</button>
+            <div style="display: flex; gap: 0.5rem;">
+              <button type="submit" class="btn btn-outline btn-sm">Crear CV Rápido</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="switchTab('tab-master-cvs')">Gestión Avanzada →</button>
+            </div>
           </form>
           <div id="cvsList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: IMPORTACIÓN Y REVISIÓN DE CV (HITO 2.1) -->
+    <section id="tab-cv-import" class="tab-content">
+      <div class="grid">
+        <!-- Carga de archivo y texto -->
+        <div class="card" style="flex: 1;">
+          <h2>Importar Documento de CV (PDF, DOCX, TXT)</h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+            Carga tu currículum o pega su contenido. Los datos se extraerán en modo <strong>pendiente de revisión</strong> (REQ-002, D12). La revisión humana es obligatoria para garantizar que no se inventen hechos.
+          </p>
+
+          <div id="dropZoneCV" class="upload-zone" onclick="document.getElementById('fileCVInput').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)">
+            <input type="file" id="fileCVInput" accept=".pdf,.docx,.txt" style="display: none;" onchange="handleFileSelected(event)">
+            <div style="font-size: 2.25rem; margin-bottom: 0.5rem;">📄</div>
+            <div style="font-weight: 600; margin-bottom: 0.25rem;">Haz clic o arrastra aquí tu archivo de CV</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Admite PDF, DOCX o TXT (Límite estricto: 5 MB)</div>
+            <div id="selectedFileName" style="margin-top: 0.75rem; font-size: 0.85rem; color: #60a5fa; font-weight: 600;"></div>
+          </div>
+
+          <div style="display: flex; gap: 0.75rem; margin-top: 1rem;">
+            <button id="btnUploadCV" class="btn btn-primary" style="flex: 1;" onclick="uploadSelectedCV()" disabled>Subir y Extraer</button>
+            <button class="btn btn-outline btn-sm" onclick="toggleRawTextImport()">Pegar Texto</button>
+          </div>
+
+          <!-- Barra de progreso visual -->
+          <div id="cvUploadProgressContainer" style="display: none; margin-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.25rem;">
+              <span id="cvUploadProgressLabel">Procesando y analizando documento...</span>
+              <span id="cvUploadProgressPercent">0%</span>
+            </div>
+            <div style="background: #0f172a; height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--card-border);">
+              <div id="cvUploadProgressBar" style="background: var(--primary); height: 100%; width: 0%; transition: width 0.3s;"></div>
+            </div>
+          </div>
+
+          <!-- Alerta de errores claros -->
+          <div id="cvUploadError" style="display: none; margin-top: 1rem; background: rgba(239, 68, 68, 0.15); border: 1px solid var(--danger); color: #fca5a5; padding: 0.75rem; border-radius: 0.375rem; font-size: 0.85rem;">
+          </div>
+
+          <!-- Importación alternativa por texto directo -->
+          <div id="rawTextInputContainer" style="display: none; margin-top: 1rem;">
+            <label>Contenido en Texto Plano</label>
+            <textarea id="txtCVRawContent" placeholder="Pega aquí el contenido de tu currículum..." style="height: 120px;"></textarea>
+            <button class="btn btn-outline btn-sm" style="margin-top: 0.5rem;" onclick="importRawCVText()">Extraer desde Texto</button>
+          </div>
+
+          <!-- Historial de Fuentes Importadas -->
+          <h3 style="font-size: 0.95rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem;">Documentos Importados (Fuentes)</h3>
+          <table id="tblSources" style="margin-top: 0.5rem;">
+            <thead>
+              <tr>
+                <th>Documento</th>
+                <th>Hash</th>
+                <th>Estado</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Sin fuentes importadas.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Área de Revisión Humana de Datos Extraídos -->
+        <div class="card" style="flex: 1.5;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; margin-bottom: 1rem;">
+            <h2>Revisión Humana de Datos Extraídos</h2>
+            <button id="btnMarkProfileVerified" class="btn btn-success btn-sm" onclick="markProfileAsVerified()">✓ Marcar Perfil Verificado</button>
+          </div>
+
+          <!-- Datos de Contacto Sugeridos -->
+          <div id="detectedContactCard" style="display: none; background: #131c2e; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <strong style="color: #60a5fa; font-size: 0.9rem;">Datos de Contacto Detectados</strong>
+              <button class="btn btn-outline btn-sm" onclick="applyDetectedContactToProfile()">Copiar al Perfil</button>
+            </div>
+            <div id="detectedContactDetails" style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5;"></div>
+          </div>
+
+          <!-- Habilidades Pendientes -->
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+            <span>Habilidades Pendientes de Revisión</span>
+            <span id="badgePendingSkillsCount" class="badge badge-pending">0</span>
+          </h3>
+          <div id="pendingSkillsContainer" style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">No hay habilidades pendientes de revisión.</div>
+          </div>
+
+          <!-- Experiencias Pendientes -->
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+            <span>Experiencias Pendientes de Revisión</span>
+            <span id="badgePendingExpCount" class="badge badge-pending">0</span>
+          </h3>
+          <div id="pendingExperiencesContainer" style="display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">No hay experiencias pendientes de revisión.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: CVS MAESTROS ESPECIALIZADOS (REQ-004, REQ-005) -->
+    <section id="tab-master-cvs" class="tab-content">
+      <div class="grid">
+        <div class="card" style="max-width: 450px;">
+          <h2 id="formMasterCVTitle">Crear CV Maestro Especializado</h2>
+          <form id="frmMasterCVForm" onsubmit="saveMasterCVForm(event)">
+            <input type="hidden" id="editMasterCvId" value="">
+            <div class="form-group">
+              <label>Nombre del CV Maestro</label>
+              <input type="text" id="mcvName" required placeholder="Ej. CV Backend Python / FastAPI">
+            </div>
+            <div class="form-group">
+              <label>Especialización del Perfil</label>
+              <input type="text" id="mcvSpecialization" required placeholder="Ej. Backend Architect & API Specialist">
+            </div>
+            <div class="form-group">
+              <label>Plantilla Visual</label>
+              <select id="mcvTemplate">
+                <option value="modern_clean">Moderna Limpia (Modern Clean)</option>
+                <option value="executive_ats">Ejecutiva Compatible ATS</option>
+                <option value="minimal_tech">Técnica Minimalista</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Resumen Profesional</label>
+              <textarea id="mcvSummary" placeholder="Resumen adaptado para esta especialización..." style="height: 100px;"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Habilidades Verificadas a Incluir</label>
+              <div id="mcvSkillsCheckboxes" style="max-height: 140px; overflow-y: auto; background: #0f172a; padding: 0.5rem; border: 1px solid var(--card-border); border-radius: 0.375rem;">
+                <span style="color: var(--text-muted); font-size: 0.8rem;">Cargando habilidades verificadas...</span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button type="submit" class="btn btn-primary" id="btnSaveMasterCV" style="flex: 1;">Guardar CV Maestro</button>
+              <button type="button" class="btn btn-outline btn-sm" id="btnCancelEditMasterCV" onclick="resetMasterCVForm()" style="display: none;">Cancelar</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card" style="flex: 2;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+            <h2>CVs Maestros Disponibles</h2>
+            <button class="btn btn-outline btn-sm" onclick="loadMasterCVsList()">Actualizar</button>
+          </div>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+            Gestiona diferentes versiones de tu CV según el rol al que postules (Backend, Fullstack, DevOps, QA). El CV activo es el que se utilizará por defecto para evaluar vacantes.
+          </p>
+          <div id="masterCVsCardsContainer" style="display: flex; flex-direction: column; gap: 1rem;">
+            <div style="text-align: center; color: var(--text-muted); padding: 2rem;">No hay CVs maestros registrados.</div>
+          </div>
         </div>
       </div>
     </section>
@@ -244,7 +472,7 @@
         </p>
         <div id="candidacyReviewContainer">
           <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
-            Selecciona una vacante en la pestaña anterior y haz clic en "Evaluar y Preparar" para iniciar la revisión.
+            Selecciona una vacante en la pestaña anterior y haz clic en "Evaluar y Revisar" para iniciar la revisión.
           </div>
         </div>
       </div>
@@ -358,20 +586,129 @@
     </div>
   </div>
 
+  <!-- MODAL: EDITAR HABILIDAD EN REVISIÓN HUMANA -->
+  <div id="modalEditSkill" class="modal-backdrop" style="display: none;">
+    <div class="modal">
+      <h2 style="margin-bottom: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">Modificar Habilidad (Revisión Humana)</h2>
+      <form onsubmit="submitEditSkill(event)">
+        <input type="hidden" id="editSkillId" value="">
+        <div class="form-group">
+          <label>Nombre de la Habilidad</label>
+          <input type="text" id="editSkillName" required>
+        </div>
+        <div class="form-group">
+          <label>Categoría</label>
+          <select id="editSkillCategory">
+            <option value="technical">Técnica</option>
+            <option value="soft">Blanda</option>
+            <option value="language">Idioma</option>
+            <option value="tool">Herramienta</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Nivel de Dominio (Proficiency)</label>
+          <select id="editSkillProficiency">
+            <option value="">Sin especificar (null)</option>
+            <option value="beginner">Principiante / Básico</option>
+            <option value="intermediate">Intermedio</option>
+            <option value="advanced">Avanzado</option>
+            <option value="expert">Experto</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Años de Experiencia</label>
+          <input type="number" id="editSkillYears" step="0.5" placeholder="Dejar vacío si no se especifica">
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Fragmento original detectado:
+          <div id="editSkillFragmentQuote" class="quote-box"></div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="closeEditSkillModal()">Cancelar</button>
+          <button type="submit" class="btn btn-success btn-sm">Guardar y Verificar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EDITAR EXPERIENCIA EN REVISIÓN HUMANA -->
+  <div id="modalEditExperience" class="modal-backdrop" style="display: none;">
+    <div class="modal">
+      <h2 style="margin-bottom: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">Modificar Experiencia Laboral (Revisión Humana)</h2>
+      <form onsubmit="submitEditExperience(event)">
+        <input type="hidden" id="editExpId" value="">
+        <div class="form-group">
+          <label>Empresa</label>
+          <input type="text" id="editExpCompany" required>
+        </div>
+        <div class="form-group">
+          <label>Puesto / Título</label>
+          <input type="text" id="editExpTitle" required>
+        </div>
+        <div style="display: flex; gap: 1rem;">
+          <div class="form-group" style="flex: 1;">
+            <label>Fecha de Inicio (YYYY-MM-DD)</label>
+            <input type="text" id="editExpStartDate" placeholder="2020-01-01">
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label>Fecha de Fin (dejar vacío si actual)</label>
+            <input type="text" id="editExpEndDate" placeholder="2023-05-01">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Precisión de Fechas</label>
+          <select id="editExpPrecision">
+            <option value="month">Mes y Año (month)</option>
+            <option value="year">Solo Año (year)</option>
+            <option value="day">Día exacto (day)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Descripción / Responsabilidades</label>
+          <textarea id="editExpDesc" style="height: 100px;"></textarea>
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Fragmento original detectado:
+          <div id="editExpFragmentQuote" class="quote-box"></div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="closeEditExperienceModal()">Cancelar</button>
+          <button type="submit" class="btn btn-success btn-sm">Guardar y Verificar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: DETALLE / INSPECCIÓN DE CV MAESTRO -->
+  <div id="modalMasterCvDetail" class="modal-backdrop" style="display: none;">
+    <div class="modal" style="max-width: 700px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; margin-bottom: 1rem;">
+        <h2 id="modalMasterCvTitle">Detalle de CV Maestro</h2>
+        <button class="btn btn-outline btn-sm" onclick="closeMasterCvDetailModal()">✕ Cerrar</button>
+      </div>
+      <div id="modalMasterCvContent"></div>
+    </div>
+  </div>
+
   <div id="toast" class="toast">Mensaje</div>
 
   <script>
     let authToken = localStorage.getItem("mc_token") || "";
     let currentUser = null;
     let isRegisterMode = false;
-    let activeCandidacies = [];
+    let selectedCVFile = null;
+    let cachedPendingSkills = [];
+    let cachedPendingExperiences = [];
+    let detectedContactCache = null;
 
     async function apiRequest(url, options = {}) {
       const headers = options.headers || {};
       if (authToken) {
         headers["Authorization"] = `Bearer ${authToken}`;
       }
-      headers["Content-Type"] = "application/json";
+      if (!options.isFormData && !headers["Content-Type"]) {
+        headers["Content-Type"] = "application/json";
+      }
       options.headers = headers;
 
       try {
@@ -424,6 +761,9 @@
       if (tabId === "tab-crm") loadCRM();
       if (tabId === "tab-vacancies") loadVacancies();
       if (tabId === "tab-execution") loadTasks();
+      if (tabId === "tab-cv-import") loadCVImportData();
+      if (tabId === "tab-master-cvs") { loadMasterCVsList(); loadVerifiedSkillsForForm(); }
+      if (tabId === "tab-profile") loadProfileData();
     }
 
     function toggleAuthModal(show = null) {
@@ -498,6 +838,10 @@
       }
     }
 
+    // =========================================================================
+    // PERFIL Y HABILIDADES
+    // =========================================================================
+
     async function saveProfile(e) {
       e.preventDefault();
       const payload = {
@@ -510,6 +854,7 @@
       };
       await apiRequest("/api/v1/profile", { method: "POST", body: JSON.stringify(payload) });
       showToast("Perfil guardado con éxito.");
+      loadProfileData();
     }
 
     async function addSkill(e) {
@@ -530,13 +875,13 @@
     async function createMasterCV(e) {
       e.preventDefault();
       const payload = {
-        name: document.getElementById("cvName").value,
-        specialization: document.getElementById("cvSpecialization").value,
-        summary: `Especialista en ${document.getElementById("cvSpecialization").value}`,
+        name: document.getElementById("cvName") ? document.getElementById("cvName").value : "CV General",
+        specialization: document.getElementById("cvSpecialization") ? document.getElementById("cvSpecialization").value : "General",
+        summary: "CV Maestro base",
       };
       await apiRequest("/api/v1/profile/cv", { method: "POST", body: JSON.stringify(payload) });
-      document.getElementById("cvName").value = "";
-      document.getElementById("cvSpecialization").value = "";
+      if (document.getElementById("cvName")) document.getElementById("cvName").value = "";
+      if (document.getElementById("cvSpecialization")) document.getElementById("cvSpecialization").value = "";
       showToast("CV Maestro creado.");
       loadProfileData();
     }
@@ -552,23 +897,621 @@
           document.getElementById("profCity").value = data.profile.location_city || "";
           document.getElementById("profCountry").value = data.profile.location_country || "";
           document.getElementById("profAvailability").value = data.profile.availability || "immediate";
+
+          const stBadge = document.getElementById("lblProfileVerificationStatus");
+          if (stBadge) {
+            const isVer = data.profile.verification_status === "verified";
+            stBadge.innerText = isVer ? "Perfil Verificado ✓" : "Pendiente de verificación";
+            stBadge.className = isVer ? "badge badge-verified" : "badge badge-pending";
+          }
         }
         if (data && data.skills) {
           const sList = document.getElementById("skillsList");
           sList.innerHTML = data.skills.map(s => `
-            <span class="hash-tag" style="padding: 0.35rem 0.6rem;">${s.name} (${s.proficiency}) - ${s.years_experience}a</span>
+            <span class="hash-tag" style="padding: 0.35rem 0.6rem;">${s.name} (${s.proficiency || 'general'}) - ${s.years_experience !== null ? s.years_experience + 'a' : 's/d'}</span>
           `).join("") || '<span style="color: var(--text-muted);">Sin habilidades.</span>';
         }
         if (data && data.master_cvs) {
           const cvList = document.getElementById("cvsList");
-          cvList.innerHTML = data.master_cvs.map(c => `
-            <div style="background: #0f172a; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 0.5rem; border: 1px solid var(--card-border);">
-              <strong>${c.name}</strong> - <span style="color: var(--text-muted);">${c.specialization}</span>
-            </div>
-          `).join("");
+          if (cvList) {
+            cvList.innerHTML = data.master_cvs.map(c => `
+              <div style="background: #0f172a; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 0.5rem; border: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <strong>${c.name}</strong> - <span style="color: var(--text-muted);">${c.specialization}</span> (v${c.version})
+                </div>
+                ${c.is_active ? '<span class="badge badge-confirmed">★ Activo</span>' : ''}
+              </div>
+            `).join("");
+          }
         }
       } catch (e) {}
     }
+
+    // =========================================================================
+    // HITO 2.1: IMPORTACIÓN DE CV Y REVISIÓN HUMANA (REQ-002, D12)
+    // =========================================================================
+
+    function handleFileSelected(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      selectedCVFile = file;
+      document.getElementById("selectedFileName").innerText = `Seleccionado: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      document.getElementById("btnUploadCV").disabled = false;
+      hideUploadError();
+    }
+
+    function handleDragOver(e) {
+      e.preventDefault();
+      document.getElementById("dropZoneCV").classList.add("dragover");
+    }
+
+    function handleDragLeave(e) {
+      e.preventDefault();
+      document.getElementById("dropZoneCV").classList.remove("dragover");
+    }
+
+    function handleFileDrop(e) {
+      e.preventDefault();
+      document.getElementById("dropZoneCV").classList.remove("dragover");
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        selectedCVFile = e.dataTransfer.files[0];
+        document.getElementById("selectedFileName").innerText = `Seleccionado: ${selectedCVFile.name} (${(selectedCVFile.size / 1024).toFixed(1)} KB)`;
+        document.getElementById("btnUploadCV").disabled = false;
+        hideUploadError();
+      }
+    }
+
+    function hideUploadError() {
+      const errBox = document.getElementById("cvUploadError");
+      errBox.style.display = "none";
+      errBox.innerText = "";
+    }
+
+    function showUploadError(msg) {
+      const errBox = document.getElementById("cvUploadError");
+      errBox.style.display = "block";
+      errBox.innerText = `Error al procesar: ${msg}`;
+    }
+
+    function toggleRawTextImport() {
+      const c = document.getElementById("rawTextInputContainer");
+      c.style.display = c.style.display === "none" ? "block" : "none";
+    }
+
+    async function uploadSelectedCV() {
+      if (!selectedCVFile) return;
+      hideUploadError();
+
+      const progressCont = document.getElementById("cvUploadProgressContainer");
+      const progressBar = document.getElementById("cvUploadProgressBar");
+      const progressLabel = document.getElementById("cvUploadProgressLabel");
+      const progressPercent = document.getElementById("cvUploadProgressPercent");
+
+      progressCont.style.display = "block";
+      progressBar.style.width = "25%";
+      progressPercent.innerText = "25%";
+      progressLabel.innerText = "Enviando archivo al servidor...";
+
+      const formData = new FormData();
+      formData.append("file", selectedCVFile);
+
+      try {
+        progressBar.style.width = "60%";
+        progressPercent.innerText = "60%";
+        progressLabel.innerText = "Analizando y aislando extracción de documento...";
+
+        const res = await fetch("/api/v1/profile/sources/upload", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${authToken}`
+          },
+          body: formData
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || `Error HTTP ${res.status}`);
+        }
+
+        progressBar.style.width = "100%";
+        progressPercent.innerText = "100%";
+        progressLabel.innerText = "¡Extracción completada!";
+
+        showToast("CV importado exitosamente. Los datos requieren revisión humana.");
+        if (data.extracted_contact) {
+          detectedContactCache = data.extracted_contact;
+          renderDetectedContact(data.extracted_contact);
+        }
+
+        setTimeout(() => { progressCont.style.display = "none"; }, 1500);
+        document.getElementById("selectedFileName").innerText = "";
+        document.getElementById("btnUploadCV").disabled = true;
+        selectedCVFile = null;
+
+        await loadCVImportData();
+      } catch (err) {
+        progressCont.style.display = "none";
+        showUploadError(err.message);
+        showToast(err.message, true);
+      }
+    }
+
+    async function importRawCVText() {
+      const rawText = document.getElementById("txtCVRawContent").value;
+      if (!rawText.trim()) {
+        showToast("Ingresa texto para importar.", true);
+        return;
+      }
+      hideUploadError();
+
+      try {
+        const res = await apiRequest("/api/v1/profile/sources/import", {
+          method: "POST",
+          body: JSON.stringify({
+            source_type: "cv_text",
+            source_name: "CV Texto Manual",
+            raw_text: rawText
+          })
+        });
+
+        showToast("Texto de CV procesado. Elementos en espera de revisión humana.");
+        if (res.extracted_contact) {
+          detectedContactCache = res.extracted_contact;
+          renderDetectedContact(res.extracted_contact);
+        }
+        document.getElementById("txtCVRawContent").value = "";
+        document.getElementById("rawTextInputContainer").style.display = "none";
+        await loadCVImportData();
+      } catch (err) {
+        showUploadError(err.message);
+      }
+    }
+
+    function renderDetectedContact(contact) {
+      const card = document.getElementById("detectedContactCard");
+      const det = document.getElementById("detectedContactDetails");
+      if (!contact || (!contact.full_name && !contact.email && !contact.phone && !contact.location_city)) {
+        card.style.display = "none";
+        return;
+      }
+      det.innerHTML = `
+        <div><strong>Nombre:</strong> ${contact.full_name || "-"}</div>
+        <div><strong>Email:</strong> ${contact.email || "-"}</div>
+        <div><strong>Teléfono:</strong> ${contact.phone || "-"}</div>
+        <div><strong>Ubicación:</strong> ${[contact.location_city, contact.location_country].filter(Boolean).join(", ") || "-"}</div>
+      `;
+      card.style.display = "block";
+    }
+
+    function applyDetectedContactToProfile() {
+      if (!detectedContactCache) return;
+      if (detectedContactCache.full_name) document.getElementById("profName").value = detectedContactCache.full_name;
+      if (detectedContactCache.email) document.getElementById("profEmail").value = detectedContactCache.email;
+      if (detectedContactCache.phone) document.getElementById("profPhone").value = detectedContactCache.phone;
+      if (detectedContactCache.location_city) document.getElementById("profCity").value = detectedContactCache.location_city;
+      if (detectedContactCache.location_country) document.getElementById("profCountry").value = detectedContactCache.location_country;
+      showToast("Datos de contacto copiados al formulario de Perfil.");
+      switchTab("tab-profile");
+    }
+
+    async function loadCVImportData() {
+      if (!authToken) return;
+      await loadSources();
+      await loadPendingReviewItems();
+    }
+
+    async function loadSources() {
+      try {
+        const sources = await apiRequest("/api/v1/profile/sources");
+        const tb = document.querySelector("#tblSources tbody");
+        if (!sources || sources.length === 0) {
+          tb.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Sin fuentes importadas.</td></tr>';
+          return;
+        }
+        tb.innerHTML = sources.map(s => `
+          <tr>
+            <td><strong>${s.source_name || s.source_type}</strong></td>
+            <td><span class="hash-tag">${(s.file_hash || '').substring(0, 10)}...</span></td>
+            <td><span class="badge ${s.verification_status === 'verified' ? 'badge-confirmed' : 'badge-pending'}">${s.verification_status}</span></td>
+            <td>
+              <button class="btn btn-outline btn-sm" onclick="inspectSourceDetail('${s.id}')">Ver Detalle</button>
+            </td>
+          </tr>
+        `).join("");
+      } catch (e) {}
+    }
+
+    async function inspectSourceDetail(sourceId) {
+      try {
+        const s = await apiRequest(`/api/v1/profile/sources/${sourceId}`);
+        if (!s) return;
+        if (s.extracted_data && s.extracted_data.contact) {
+          detectedContactCache = s.extracted_data.contact;
+          renderDetectedContact(s.extracted_data.contact);
+        }
+        showToast(`Fuente: ${s.source_name} (${s.skills.length} habilidades, ${s.experiences.length} experiencias)`);
+      } catch (e) {}
+    }
+
+    async function loadPendingReviewItems() {
+      try {
+        const data = await apiRequest("/api/v1/profile/items/pending");
+        if (!data) return;
+
+        cachedPendingSkills = data.pending_skills || [];
+        cachedPendingExperiences = data.pending_experiences || [];
+
+        renderPendingSkills(cachedPendingSkills);
+        renderPendingExperiences(cachedPendingExperiences);
+      } catch (e) {}
+    }
+
+    function renderPendingSkills(skills) {
+      const container = document.getElementById("pendingSkillsContainer");
+      const badge = document.getElementById("badgePendingSkillsCount");
+      badge.innerText = skills.length;
+
+      if (skills.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem;">No hay habilidades pendientes de revisión.</div>';
+        return;
+      }
+
+      container.innerHTML = skills.map(s => `
+        <div class="item-review-card" id="card-skill-${s.id}">
+          <div class="item-review-card-header">
+            <strong>${s.name}</strong>
+            <span class="badge badge-pending">Pendiente</span>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);">
+            Categoría: <strong>${s.category}</strong> | Nivel: <strong>${s.proficiency || 'No declarado'}</strong> | Años: <strong>${s.years_experience !== null ? s.years_experience : 'No declarados'}</strong>
+          </div>
+          <div class="quote-box" title="Fragmento textual de origen en el documento">
+            "${s.source_fragment || 'Fragmento no registrado'}"
+          </div>
+          <div class="item-review-actions">
+            <button class="btn btn-success btn-sm" onclick="reviewSkillItem('${s.id}', 'accept')">✓ Aceptar</button>
+            <button class="btn btn-outline btn-sm" onclick="openEditSkillModal('${s.id}')">✎ Modificar</button>
+            <button class="btn btn-danger btn-sm" onclick="reviewSkillItem('${s.id}', 'reject')">✗ Rechazar</button>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function renderPendingExperiences(exps) {
+      const container = document.getElementById("pendingExperiencesContainer");
+      const badge = document.getElementById("badgePendingExpCount");
+      badge.innerText = exps.length;
+
+      if (exps.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem;">No hay experiencias pendientes de revisión.</div>';
+        return;
+      }
+
+      container.innerHTML = exps.map(e => `
+        <div class="item-review-card" id="card-exp-${e.id}">
+          <div class="item-review-card-header">
+            <strong>${e.title}</strong> en <span>${e.company}</span>
+            <span class="badge badge-pending">Pendiente</span>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);">
+            Período: <strong>${e.start_date || 's/f'}</strong> a <strong>${e.end_date || 'Actual'}</strong> (Precisión: ${e.date_precision})
+          </div>
+          ${e.description ? `<div style="font-size: 0.8rem; color: var(--text);">${e.description}</div>` : ''}
+          <div class="quote-box" title="Fragmento textual de origen en el documento">
+            "${e.source_fragment || 'Fragmento no registrado'}"
+          </div>
+          <div class="item-review-actions">
+            <button class="btn btn-success btn-sm" onclick="reviewExperienceItem('${e.id}', 'accept')">✓ Aceptar</button>
+            <button class="btn btn-outline btn-sm" onclick="openEditExperienceModal('${e.id}')">✎ Modificar</button>
+            <button class="btn btn-danger btn-sm" onclick="reviewExperienceItem('${e.id}', 'reject')">✗ Rechazar</button>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    async function reviewSkillItem(skillId, decision, modifications = null) {
+      try {
+        const payload = { decision, modifications };
+        await apiRequest(`/api/v1/profile/items/skills/${skillId}/review`, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        showToast(decision === "accept" ? "Habilidad aceptada y verificada." : (decision === "reject" ? "Habilidad rechazada." : "Habilidad modificada y verificada."));
+        await loadPendingReviewItems();
+        await loadProfileData();
+        await loadVerifiedSkillsForForm();
+      } catch (err) {}
+    }
+
+    async function reviewExperienceItem(expId, decision, modifications = null) {
+      try {
+        const payload = { decision, modifications };
+        await apiRequest(`/api/v1/profile/items/experiences/${expId}/review`, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        showToast(decision === "accept" ? "Experiencia aceptada y verificada." : (decision === "reject" ? "Experiencia rechazada." : "Experiencia modificada y verificada."));
+        await loadPendingReviewItems();
+        await loadProfileData();
+      } catch (err) {}
+    }
+
+    function openEditSkillModal(skillId) {
+      const s = cachedPendingSkills.find(item => item.id === skillId);
+      if (!s) return;
+      document.getElementById("editSkillId").value = s.id;
+      document.getElementById("editSkillName").value = s.name;
+      document.getElementById("editSkillCategory").value = s.category;
+      document.getElementById("editSkillProficiency").value = s.proficiency || "";
+      document.getElementById("editSkillYears").value = s.years_experience !== null ? s.years_experience : "";
+      document.getElementById("editSkillFragmentQuote").innerText = s.source_fragment || "Sin fragmento";
+      document.getElementById("modalEditSkill").style.display = "flex";
+    }
+
+    function closeEditSkillModal() {
+      document.getElementById("modalEditSkill").style.display = "none";
+    }
+
+    async function submitEditSkill(e) {
+      e.preventDefault();
+      const id = document.getElementById("editSkillId").value;
+      const yearsVal = document.getElementById("editSkillYears").value;
+      const modifications = {
+        name: document.getElementById("editSkillName").value,
+        category: document.getElementById("editSkillCategory").value,
+        proficiency: document.getElementById("editSkillProficiency").value || null,
+        years_experience: yearsVal ? parseFloat(yearsVal) : null,
+      };
+      await reviewSkillItem(id, "modify", modifications);
+      closeEditSkillModal();
+    }
+
+    function openEditExperienceModal(expId) {
+      const exp = cachedPendingExperiences.find(item => item.id === expId);
+      if (!exp) return;
+      document.getElementById("editExpId").value = exp.id;
+      document.getElementById("editExpCompany").value = exp.company;
+      document.getElementById("editExpTitle").value = exp.title;
+      document.getElementById("editExpStartDate").value = exp.start_date || "";
+      document.getElementById("editExpEndDate").value = exp.end_date || "";
+      document.getElementById("editExpPrecision").value = exp.date_precision || "month";
+      document.getElementById("editExpDesc").value = exp.description || "";
+      document.getElementById("editExpFragmentQuote").innerText = exp.source_fragment || "Sin fragmento";
+      document.getElementById("modalEditExperience").style.display = "flex";
+    }
+
+    function closeEditExperienceModal() {
+      document.getElementById("modalEditExperience").style.display = "none";
+    }
+
+    async function submitEditExperience(e) {
+      e.preventDefault();
+      const id = document.getElementById("editExpId").value;
+      const modifications = {
+        company: document.getElementById("editExpCompany").value,
+        title: document.getElementById("editExpTitle").value,
+        start_date: document.getElementById("editExpStartDate").value || null,
+        end_date: document.getElementById("editExpEndDate").value || null,
+        date_precision: document.getElementById("editExpPrecision").value,
+        description: document.getElementById("editExpDesc").value,
+      };
+      await reviewExperienceItem(id, "modify", modifications);
+      closeEditExperienceModal();
+    }
+
+    async function markProfileAsVerified() {
+      try {
+        await apiRequest("/api/v1/profile/verify", { method: "POST" });
+        showToast("¡Perfil marcado como verificado!");
+        loadProfileData();
+      } catch (err) {}
+    }
+
+    // =========================================================================
+    // CVS MAESTROS ESPECIALIZADOS (REQ-004, REQ-005)
+    // =========================================================================
+
+    async function loadMasterCVsList() {
+      if (!authToken) return;
+      try {
+        const cvs = await apiRequest("/api/v1/profile/cv");
+        const container = document.getElementById("masterCVsCardsContainer");
+        if (!cvs || cvs.length === 0) {
+          container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">No hay CVs maestros registrados. Crea uno para comenzar.</div>';
+          return;
+        }
+
+        container.innerHTML = cvs.map(c => `
+          <div class="master-cv-card ${c.is_active ? 'active-cv' : ''}">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+              <div>
+                <h3 style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">${c.name}</h3>
+                <span style="color: #60a5fa; font-size: 0.85rem; font-weight: 500;">${c.specialization}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span class="badge badge-pending">v${c.version}</span>
+                <span class="hash-tag">${c.template_id || 'modern_clean'}</span>
+                ${c.is_active ? '<span class="badge badge-confirmed">★ Activo</span>' : ''}
+              </div>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+              ${c.summary || 'Sin resumen profesional definido.'}
+            </p>
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end; border-top: 1px solid var(--card-border); padding-top: 0.75rem;">
+              ${!c.is_active ? `<button class="btn btn-outline btn-sm" onclick="selectMasterCV('${c.id}')">★ Activar</button>` : ''}
+              <button class="btn btn-outline btn-sm" onclick="inspectMasterCV('${c.id}')">👁 Inspeccionar</button>
+              <button class="btn btn-outline btn-sm" onclick="editMasterCV('${c.id}')">✎ Editar</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteMasterCV('${c.id}')">🗑 Eliminar</button>
+            </div>
+          </div>
+        `).join("");
+      } catch (err) {}
+    }
+
+    async function loadVerifiedSkillsForForm(selectedSkills = []) {
+      if (!authToken) return;
+      try {
+        const prof = await apiRequest("/api/v1/profile");
+        const cont = document.getElementById("mcvSkillsCheckboxes");
+        if (!prof || !prof.skills || prof.skills.length === 0) {
+          cont.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8rem;">No hay habilidades verificadas disponibles. Importa y revisa un CV primero.</span>';
+          return;
+        }
+
+        cont.innerHTML = prof.skills.map(s => `
+          <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; font-size: 0.85rem; cursor: pointer;">
+            <input type="checkbox" name="mcvSkillCheck" value="${s.name}" ${selectedSkills.includes(s.name) ? 'checked' : ''} style="width: auto;">
+            <span>${s.name} (${s.proficiency || 'general'})</span>
+          </label>
+        `).join("");
+      } catch (err) {}
+    }
+
+    async function saveMasterCVForm(e) {
+      e.preventDefault();
+      const editId = document.getElementById("editMasterCvId").value;
+      const selectedSkills = Array.from(document.querySelectorAll("input[name='mcvSkillCheck']:checked")).map(cb => cb.value);
+
+      const payload = {
+        name: document.getElementById("mcvName").value,
+        specialization: document.getElementById("mcvSpecialization").value,
+        template_id: document.getElementById("mcvTemplate").value,
+        summary: document.getElementById("mcvSummary").value,
+        sections: {
+          included_skills: selectedSkills,
+          updated_at: new Date().toISOString()
+        }
+      };
+
+      try {
+        if (editId) {
+          await apiRequest(`/api/v1/profile/cv/${editId}`, {
+            method: "PUT",
+            body: JSON.stringify(payload)
+          });
+          showToast("CV Maestro actualizado con éxito.");
+        } else {
+          await apiRequest("/api/v1/profile/cv", {
+            method: "POST",
+            body: JSON.stringify(payload)
+          });
+          showToast("CV Maestro creado con éxito.");
+        }
+
+        resetMasterCVForm();
+        await loadMasterCVsList();
+        await loadProfileData();
+      } catch (err) {}
+    }
+
+    function resetMasterCVForm() {
+      document.getElementById("editMasterCvId").value = "";
+      document.getElementById("mcvName").value = "";
+      document.getElementById("mcvSpecialization").value = "";
+      document.getElementById("mcvSummary").value = "";
+      document.getElementById("mcvTemplate").value = "modern_clean";
+      document.getElementById("formMasterCVTitle").innerText = "Crear CV Maestro Especializado";
+      document.getElementById("btnSaveMasterCV").innerText = "Guardar CV Maestro";
+      document.getElementById("btnCancelEditMasterCV").style.display = "none";
+      loadVerifiedSkillsForForm([]);
+    }
+
+    async function editMasterCV(cvId) {
+      try {
+        const data = await apiRequest(`/api/v1/profile/cv/${cvId}`);
+        if (!data || !data.cv) return;
+        const cv = data.cv;
+
+        document.getElementById("editMasterCvId").value = cv.id;
+        document.getElementById("mcvName").value = cv.name;
+        document.getElementById("mcvSpecialization").value = cv.specialization;
+        document.getElementById("mcvSummary").value = cv.summary || "";
+        document.getElementById("mcvTemplate").value = cv.template_id || "modern_clean";
+
+        document.getElementById("formMasterCVTitle").innerText = `Editar CV Maestro: ${cv.name}`;
+        document.getElementById("btnSaveMasterCV").innerText = "Actualizar CV Maestro";
+        document.getElementById("btnCancelEditMasterCV").style.display = "inline-block";
+
+        const inclSkills = (cv.sections && cv.sections.included_skills) ? cv.sections.included_skills : [];
+        loadVerifiedSkillsForForm(inclSkills);
+
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (err) {}
+    }
+
+    async function selectMasterCV(cvId) {
+      try {
+        await apiRequest(`/api/v1/profile/cv/${cvId}/select`, { method: "POST" });
+        showToast("CV Maestro marcado como activo para postulaciones.");
+        await loadMasterCVsList();
+        await loadProfileData();
+      } catch (err) {}
+    }
+
+    async function deleteMasterCV(cvId) {
+      if (!confirm("¿Deseas eliminar este CV Maestro especializado?")) return;
+      try {
+        await apiRequest(`/api/v1/profile/cv/${cvId}`, { method: "DELETE" });
+        showToast("CV Maestro eliminado.");
+        await loadMasterCVsList();
+        await loadProfileData();
+      } catch (err) {}
+    }
+
+    async function inspectMasterCV(cvId) {
+      try {
+        const data = await apiRequest(`/api/v1/profile/cv/${cvId}`);
+        if (!data) return;
+        const cv = data.cv;
+        document.getElementById("modalMasterCvTitle").innerText = `${cv.name} (v${cv.version})`;
+
+        const skillsHtml = (data.verified_skills || []).map(s => `
+          <div style="background: #0f172a; border: 1px solid var(--card-border); padding: 0.5rem; border-radius: 0.25rem;">
+            <strong>${s.name}</strong> - <span>${s.proficiency || 'General'}</span> (${s.years_experience !== null ? s.years_experience + ' años' : 's/d'})
+            <div class="quote-box" style="margin-top: 0.25rem;">"${s.source_fragment || 'Verificado'}"</div>
+          </div>
+        `).join("") || '<span style="color: var(--text-muted);">Sin habilidades vinculadas.</span>';
+
+        const expHtml = (data.verified_experiences || []).map(e => `
+          <div style="background: #0f172a; border: 1px solid var(--card-border); padding: 0.5rem; border-radius: 0.25rem;">
+            <strong>${e.title}</strong> en <span>${e.company}</span> (${e.start_date || ''} - ${e.end_date || 'Actual'})
+            ${e.description ? `<p style="font-size: 0.8rem; margin: 0.25rem 0;">${e.description}</p>` : ''}
+            <div class="quote-box">"${e.source_fragment || 'Verificado'}"</div>
+          </div>
+        `).join("") || '<span style="color: var(--text-muted);">Sin experiencias vinculadas.</span>';
+
+        document.getElementById("modalMasterCvContent").innerHTML = `
+          <div style="margin-bottom: 1rem;">
+            <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem;">
+              <span class="badge ${cv.is_active ? 'badge-confirmed' : 'badge-pending'}">${cv.is_active ? '★ ACTIVO' : 'Inactivo'}</span>
+              <span class="hash-tag">Plantilla: ${cv.template_id || 'modern_clean'}</span>
+              <span style="font-size: 0.85rem; color: var(--text-muted);">Especialización: <strong>${cv.specialization}</strong></span>
+            </div>
+            <p style="font-size: 0.9rem; line-height: 1.5; background: #0f172a; padding: 0.75rem; border-radius: 0.375rem; border: 1px solid var(--card-border);">
+              ${cv.summary || 'Sin resumen definido.'}
+            </p>
+          </div>
+          <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem;">Habilidades Verificadas Disponibles (${data.verified_skills.length})</h4>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem; margin-bottom: 1rem;">
+            ${skillsHtml}
+          </div>
+          <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem;">Experiencias Verificadas Vinculadas (${data.verified_experiences.length})</h4>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            ${expHtml}
+          </div>
+        `;
+
+        document.getElementById("modalMasterCvDetail").style.display = "flex";
+      } catch (err) {}
+    }
+
+    function closeMasterCvDetailModal() {
+      document.getElementById("modalMasterCvDetail").style.display = "none";
+    }
+
+    // =========================================================================
+    // VACANTES, EVALUACIÓN Y APROBACIÓN
+    // =========================================================================
 
     async function importVacancy(e) {
       e.preventDefault();
@@ -614,7 +1557,8 @@
           showToast("Debes crear al menos un CV Maestro en Perfil.", true);
           return;
         }
-        const cvId = prof.master_cvs[0].id;
+        const activeCv = prof.master_cvs.find(c => c.is_active) || prof.master_cvs[0];
+        const cvId = activeCv.id;
         showToast("Evaluando compatibilidad...");
         const evalRes = await apiRequest("/api/v1/evaluations", {
           method: "POST",
@@ -627,7 +1571,6 @@
           body: JSON.stringify({ vacancy_id: vacancyId, cv_id: cvId, evaluation_id: evalRes.id })
         });
 
-        // Cargar vista de revisión
         inspectCandidacy(cand.id);
         switchTab('tab-approvals');
       } catch (err) {
@@ -761,6 +1704,8 @@
 
     async function loadInitialData() {
       await loadProfileData();
+      await loadCVImportData();
+      await loadMasterCVsList();
       await loadVacancies();
       await loadCRM();
       await loadTasks();
