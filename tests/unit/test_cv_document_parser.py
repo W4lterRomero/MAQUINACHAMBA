@@ -316,3 +316,98 @@ def test_pdf_too_many_pages_rejected():
     with pytest.raises(InvalidDocumentError, match="excede el número máximo permitido de páginas"):
         DocumentParser.parse(pdf_bytes, "too_many_pages.pdf")
 
+
+def test_proficiency_association_two_distinct_levels_same_sentence():
+    """
+    Regresión P1: "Python básico, JavaScript avanzado" debe asociar nivel básico a Python
+    y nivel avanzado a JavaScript de forma estrictamente local, sin compartir el nivel
+    de la oración completa entre ambas habilidades.
+    """
+    raw_text = (
+        "Candidato: Juan Pérez\n"
+        "Email: juan@example.com\n"
+        "Habilidades técnicas: Python básico, JavaScript avanzado.\n"
+    )
+    doc = DocumentParser.parse(raw_text.encode("utf-8"), "cv_skills.txt")
+    skills_map = {s.name.lower(): s.proficiency for s in doc.skills}
+
+    assert "python" in skills_map
+    assert "javascript" in skills_map
+    assert skills_map["python"] == "beginner", f"Python esperaba 'beginner', obtuvo {skills_map['python']}"
+    assert skills_map["javascript"] == "advanced", f"JavaScript esperaba 'advanced', obtuvo {skills_map['javascript']}"
+
+
+def test_proficiency_association_inverted_order():
+    """
+    Regresión P1: "JavaScript avanzado, Python básico" con orden invertido debe asociar
+    correctamente avanzado a JavaScript y básico a Python.
+    """
+    raw_text = (
+        "Candidato: Juan Pérez\n"
+        "Email: juan@example.com\n"
+        "Habilidades técnicas: JavaScript avanzado, Python básico.\n"
+    )
+    doc = DocumentParser.parse(raw_text.encode("utf-8"), "cv_skills_inv.txt")
+    skills_map = {s.name.lower(): s.proficiency for s in doc.skills}
+
+    assert skills_map["javascript"] == "advanced", f"JavaScript esperaba 'advanced', obtuvo {skills_map['javascript']}"
+    assert skills_map["python"] == "beginner", f"Python esperaba 'beginner', obtuvo {skills_map['python']}"
+
+
+def test_proficiency_association_ambiguous_preserves_none():
+    """
+    Verifica que si la asociación de nivel es ambigua o existen niveles conflictivos,
+    se preserve null/None estrictamente sin inventar niveles.
+    """
+    # Caso 1: Nivel posterior a JavaScript que no puede atribuirse con certeza a Python
+    text_ambiguous = "Experiencia práctica en Python y JavaScript avanzado."
+    doc1 = DocumentParser.parse(text_ambiguous.encode("utf-8"), "cv_ambig.txt")
+    s1_map = {s.name.lower(): s.proficiency for s in doc1.skills}
+    assert s1_map["python"] is None, f"Python no debe heredar nivel ambiguo: {s1_map['python']}"
+    assert s1_map["javascript"] == "advanced"
+
+    # Caso 2: Conflicto de niveles en el mismo ámbito
+    text_conflict = "Conocimientos de Python básico y avanzado según el entorno."
+    doc2 = DocumentParser.parse(text_conflict.encode("utf-8"), "cv_conflict.txt")
+    s2_map = {s.name.lower(): s.proficiency for s in doc2.skills}
+    assert s2_map["python"] is None, f"Python con niveles en conflicto debe preservar None: {s2_map['python']}"
+
+    # Caso 3: Mención sin niveles declarados
+    text_none = "Dominio de FastAPI, Docker y Linux para proyectos backend."
+    doc3 = DocumentParser.parse(text_none.encode("utf-8"), "cv_no_level.txt")
+    for s in doc3.skills:
+        assert s.proficiency is None, f"Habilidad {s.name} no debe inventar nivel: {s.proficiency}"
+
+
+def test_document_parser_process_timeout_termination(monkeypatch):
+    """
+    Verifica que si la extracción en proceso hijo supera el tiempo límite permitido,
+    el proceso es terminado y se lanza InvalidDocumentError sin bloquear el bucle del servidor.
+    """
+    def slow_parse_internal(cls, file_bytes, filename):
+        import time
+        time.sleep(1.0)
+        return cls._parse_internal(file_bytes, filename)
+
+    monkeypatch.setattr(DocumentParser, "_parse_internal", classmethod(slow_parse_internal))
+
+    with pytest.raises(InvalidDocumentError, match="excedió el tiempo límite permitido"):
+        DocumentParser.parse(b"Python basico\n", "cv_slow.txt", timeout=0.2)
+
+
+def test_document_parser_process_memory_budget_exceeded(monkeypatch):
+    """
+    Verifica que si la extracción en proceso hijo supera el presupuesto estricto de memoria,
+    el proceso falla de forma segura fail-closed lanzando InvalidDocumentError.
+    """
+    def memory_hog_parse_internal(cls, file_bytes, filename):
+        # Asigna un bloque de memoria que excede el límite fijado
+        _ = bytearray(60 * 1024 * 1024)
+        return cls._parse_internal(file_bytes, filename)
+
+    monkeypatch.setattr(DocumentParser, "_parse_internal", classmethod(memory_hog_parse_internal))
+
+    with pytest.raises(InvalidDocumentError, match="presupuesto de memoria|finalizó anormalmente"):
+        DocumentParser.parse(b"Python basico\n", "cv_mem.txt", timeout=2.0, max_memory_bytes=30 * 1024 * 1024)
+
+

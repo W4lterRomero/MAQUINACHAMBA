@@ -72,6 +72,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Límite estricto del cuerpo de peticiones antes de procesar multipart o JSON (Hito 2.1)
+    from backend.app.core.body_limit import RequestBodyLimitMiddleware
+    app.add_middleware(RequestBodyLimitMiddleware)
+
     # Health check
     @app.get("/api/health")
     async def health():

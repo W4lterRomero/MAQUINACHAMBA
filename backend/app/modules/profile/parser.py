@@ -15,7 +15,9 @@ Principios clave:
 from dataclasses import dataclass, field
 import hashlib
 import io
+import multiprocessing as mp
 import re
+import resource
 from typing import Any, Dict, List, Optional
 import zipfile
 
@@ -42,6 +44,9 @@ MAX_ZIP_COMPRESSION_RATIO = 100.0  # Razón máxima de compresión (uncompressed
 MAX_ZIP_ENTRY_SIZE = 10 * 1024 * 1024  # 10 MB límite para una sola entrada
 MAX_PDF_PAGES = 50  # Máximo de páginas para un documento curricular
 MAX_EXTRACTED_TEXT_LENGTH = 1_000_000  # 1 MB de caracteres de texto (~200,000 palabras)
+MAX_PARSER_MEMORY_BYTES = 512 * 1024 * 1024  # 512 MB presupuesto de memoria virtual
+PARSER_TIMEOUT_SECONDS = 5.0  # Tiempo límite para proceso hijo de extracción
+
 
 # Diccionario curado de tecnologías y habilidades reconocidas
 # NUNCA CONTIENE AÑOS NI NIVELES POR DEFECTO (prohibido inventar hechos)
@@ -132,14 +137,218 @@ class ExtractedDocument:
     injection_signals: List[str]
 
 
+PROFICIENCY_MAP: Dict[str, str] = {
+    "básico": "beginner",
+    "basico": "beginner",
+    "basic": "beginner",
+    "principiante": "beginner",
+    "intermedio": "intermediate",
+    "intermediate": "intermediate",
+    "avanzado": "advanced",
+    "advanced": "advanced",
+    "experto": "expert",
+    "expert": "expert",
+}
+
+PROFICIENCY_REGEX = re.compile(
+    r"\b(b[aá]sico|basic|principiante|intermedio|intermediate|avanzado|advanced|experto|expert)\b",
+    re.IGNORECASE,
+)
+
+
+def _associate_skill_proficiency(sentence: str, skill_kw: str) -> Optional[str]:
+    """
+    Asocia de forma determinista y estrictamente local el nivel de competencia a una habilidad.
+    Reglas:
+    - Busca modificadores en la proximidad inmediata posterior o anterior.
+    - Acota la búsqueda ante delimitadores (comas, puntos y comas, viñetas, saltos) o ante la
+      aparición de otra habilidad reconocida para no compartir niveles entre habilidades contiguas.
+    - Si la relación es ambigua o existen niveles en conflicto en el ámbito local, retorna None (NUNCA inventar).
+    """
+    pattern = rf"\b{re.escape(skill_kw)}\b"
+    matches = list(re.finditer(pattern, sentence, re.IGNORECASE))
+    if not matches:
+        return None
+
+    for m in matches:
+        # 1. Ventana posterior inmediata (post-window) hasta 45 caracteres
+        post_raw = sentence[m.end():m.end() + 45]
+        delim_idx = len(post_raw)
+        for sep in [",", ";", "\n", "•", "|", " - "]:
+            idx = post_raw.find(sep)
+            if idx != -1 and idx < delim_idx:
+                delim_idx = idx
+
+        # Cortar si aparece otra habilidad conocida en la ventana posterior
+        for other_sk in KNOWN_SKILL_CATEGORIES.keys():
+            if other_sk == skill_kw.lower():
+                continue
+            sk_m = re.search(rf"\b{re.escape(other_sk)}\b", post_raw, re.IGNORECASE)
+            if sk_m and sk_m.start() < delim_idx:
+                delim_idx = sk_m.start()
+
+        post_chunk = post_raw[:delim_idx]
+        post_levels = {PROFICIENCY_MAP[w.lower()] for w in PROFICIENCY_REGEX.findall(post_chunk)}
+        if len(post_levels) == 1:
+            return next(iter(post_levels))
+        elif len(post_levels) > 1:
+            return None  # Conflicto de niveles en el mismo ámbito local
+
+        # 2. Ventana anterior inmediata (pre-window) hasta 45 caracteres
+        start_bound = max(0, m.start() - 45)
+        pre_raw = sentence[start_bound:m.start()]
+        last_delim = -1
+        for sep in [",", ";", "\n", "•", "|", " - "]:
+            idx = pre_raw.rfind(sep)
+            if idx != -1 and idx > last_delim:
+                last_delim = idx + len(sep)
+
+        for other_sk in KNOWN_SKILL_CATEGORIES.keys():
+            if other_sk == skill_kw.lower():
+                continue
+            for sk_m in re.finditer(rf"\b{re.escape(other_sk)}\b", pre_raw, re.IGNORECASE):
+                if sk_m.end() > last_delim:
+                    last_delim = sk_m.end()
+
+        pre_chunk = pre_raw[max(0, last_delim):]
+        pre_levels = {PROFICIENCY_MAP[w.lower()] for w in PROFICIENCY_REGEX.findall(pre_chunk)}
+        if len(pre_levels) == 1:
+            return next(iter(pre_levels))
+        elif len(pre_levels) > 1:
+            return None
+
+    return None
+
+
+def _isolated_parse_worker(
+    child_conn,
+    file_bytes: bytes,
+    filename: str,
+    max_memory_bytes: int,
+):
+    """
+    Función trabajadora que se ejecuta en un proceso hijo aislado con presupuestos
+    estrictos de memoria y recursos del sistema operativo.
+    """
+    try:
+        # Acotar límite de memoria virtual en sistemas POSIX
+        if hasattr(resource, "setrlimit") and hasattr(resource, "RLIMIT_AS"):
+            try:
+                resource.setrlimit(resource.RLIMIT_AS, (max_memory_bytes, max_memory_bytes))
+            except (ValueError, OSError):
+                pass
+
+        doc = DocumentParser._parse_internal(file_bytes=file_bytes, filename=filename)
+        child_conn.send(("ok", doc))
+    except InvalidDocumentError as ide:
+        child_conn.send(("invalid", str(ide)))
+    except MemoryError:
+        child_conn.send(("invalid", "El procesamiento del documento excedió el presupuesto de memoria permitido."))
+    except Exception as exc:
+        child_conn.send(("error", f"Error durante la extracción: {exc}"))
+    finally:
+        try:
+            child_conn.close()
+        except Exception:
+            pass
+
+
 class DocumentParser:
     """Parser local y seguro para documentos curriculares con presupuestos estrictos de recursos."""
 
     @classmethod
-    def parse(cls, file_bytes: bytes, filename: str) -> ExtractedDocument:
+    def parse(
+        cls,
+        file_bytes: bytes,
+        filename: str,
+        timeout: float = PARSER_TIMEOUT_SECONDS,
+        max_memory_bytes: int = MAX_PARSER_MEMORY_BYTES,
+    ) -> ExtractedDocument:
         """
-        Valida, sanitiza y extrae información estructurada de un archivo de CV.
+        Valida, sanitiza y extrae información estructurada de un archivo de CV
+        dentro de un proceso hijo aislado con límite estricto de tiempo y presupuesto de memoria.
         No ejecuta código ni realiza peticiones externas.
+        """
+        # 1. Validación previa fail-closed rápida antes de crear proceso
+        if not file_bytes or len(file_bytes) == 0:
+            raise InvalidDocumentError("El archivo está vacío.")
+
+        if len(file_bytes) > MAX_CV_FILE_SIZE:
+            raise InvalidDocumentError(
+                f"El archivo excede el tamaño máximo permitido de 5 MB ({len(file_bytes)} bytes)."
+            )
+
+        lower_name = filename.lower()
+        matched_ext = next((ext for ext in ALLOWED_EXTENSIONS if lower_name.endswith(ext)), None)
+        if not matched_ext:
+            raise InvalidDocumentError(
+                f"Tipo de archivo no permitido para '{filename}'. Formatos soportados: PDF, DOCX, TXT."
+            )
+
+        # Si timeout <= 0, ejecuta internamente en el mismo proceso
+        if timeout <= 0:
+            return cls._parse_internal(file_bytes=file_bytes, filename=filename)
+
+        # Multiproceso aislado con Pipes
+        ctx = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else None)
+        parent_conn, child_conn = ctx.Pipe()
+
+        proc = ctx.Process(
+            target=_isolated_parse_worker,
+            args=(child_conn, file_bytes, filename, max_memory_bytes),
+        )
+        proc.start()
+
+        # Esperar hasta agotar timeout
+        proc.join(timeout=timeout)
+
+        if proc.is_alive():
+            # Terminar y matar proceso que excede el tiempo límite
+            try:
+                proc.terminate()
+                proc.join(timeout=0.5)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=0.5)
+            except Exception:
+                pass
+            finally:
+                try:
+                    parent_conn.close()
+                except Exception:
+                    pass
+                proc.close()
+            raise InvalidDocumentError(
+                f"El procesamiento del documento excedió el tiempo límite permitido ({timeout}s)."
+            )
+
+        exitcode = proc.exitcode
+        proc.close()
+
+        if exitcode != 0 and not parent_conn.poll():
+            parent_conn.close()
+            raise InvalidDocumentError(
+                f"El proceso de extracción del documento finalizó anormalmente (código {exitcode}). "
+                "Posible agotamiento de memoria o archivo malicioso."
+            )
+
+        if parent_conn.poll():
+            status, payload = parent_conn.recv()
+            parent_conn.close()
+            if status == "ok":
+                return payload
+            elif status == "invalid":
+                raise InvalidDocumentError(payload)
+            else:
+                raise InvalidDocumentError(payload)
+        else:
+            parent_conn.close()
+            raise InvalidDocumentError("El proceso de extracción no retornó ningún resultado.")
+
+    @classmethod
+    def _parse_internal(cls, file_bytes: bytes, filename: str) -> ExtractedDocument:
+        """
+        Extracción interna ejecutada dentro del proceso aislado o de forma directa.
         """
         # 1. Validación de tamaño
         if not file_bytes or len(file_bytes) == 0:
@@ -426,22 +635,8 @@ class DocumentParser:
                         except ValueError:
                             extracted_years = None
 
-                    # Intentar extraer nivel ÚNICAMENTE si está declarado de forma explícita
-                    prof_match = re.search(
-                        r"\b(b[aá]sico|basic|principiante|intermedio|intermediate|avanzado|advanced|experto|expert)\b",
-                        sentence,
-                        re.IGNORECASE,
-                    )
-                    if prof_match:
-                        raw_p = prof_match.group(1).lower()
-                        if "bás" in raw_p or "bas" in raw_p or "princ" in raw_p:
-                            extracted_proficiency = "beginner"
-                        elif "inter" in raw_p:
-                            extracted_proficiency = "intermediate"
-                        elif "avanz" in raw_p or "adv" in raw_p:
-                            extracted_proficiency = "advanced"
-                        elif "exp" in raw_p:
-                            extracted_proficiency = "expert"
+                    # Intentar extraer nivel ÚNICAMENTE si está asociado localmente y de forma inequívoca
+                    extracted_proficiency = _associate_skill_proficiency(sentence, skill_kw)
 
                     break
 

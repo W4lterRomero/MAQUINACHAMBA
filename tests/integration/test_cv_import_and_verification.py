@@ -507,14 +507,15 @@ async def test_import_json_size_limit_rejection(client: AsyncClient):
         "location_country": "México",
     }, headers=headers)
 
-    # 1. Base64 excesivo
+    # 1. Base64 excesivo (acotado por middleware previo a parsing ASGI con 413 o por ruta con 400)
     oversized_b64 = "A" * (7 * 1024 * 1024)
     res_b64 = await client.post("/api/v1/profile/sources/import", json={
         "filename": "huge.pdf",
         "content_base64": oversized_b64,
     }, headers=headers)
-    assert res_b64.status_code == 400
+    assert res_b64.status_code in (400, 413)
     assert "excede el tamaño máximo" in res_b64.json()["detail"]
+
 
     # 2. Texto plano excesivo
     oversized_text = "B" * (5 * 1024 * 1024 + 1024)
@@ -524,4 +525,121 @@ async def test_import_json_size_limit_rejection(client: AsyncClient):
     }, headers=headers)
     assert res_txt.status_code == 400
     assert "excede el tamaño máximo" in res_txt.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_asgi_body_limit_content_length_rejection(client: AsyncClient):
+    """
+    Verifica que el middleware ASGI RequestBodyLimitMiddleware intercepte y rechace
+    peticiones con Content-Length > 5.5 MB con HTTP 413 antes de que el framework
+    procese o almacene el cuerpo en memoria.
+    """
+    headers = {
+        "content-length": str(6 * 1024 * 1024),
+        "content-type": "application/json",
+    }
+    # Se envía a cualquier endpoint del sistema
+    res = await client.post("/api/v1/profile/sources/import", content=b"{}", headers=headers)
+    assert res.status_code == 413
+    data = res.json()
+    assert "excede el tamaño máximo permitido" in data["detail"]
+    assert "6291456 bytes declarados" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_asgi_body_limit_chunked_stream_without_content_length(client: AsyncClient):
+    """
+    Verifica que el middleware ASGI RequestBodyLimitMiddleware corte transferencias
+    en streaming o chunked sin cabecera Content-Length tan pronto como el acumulado
+    de bytes recibidos supera el límite de 5.5 MB, respondiendo con HTTP 413 fail-closed.
+    """
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "stream_chunked_user@example.com",
+        "password": "PasswordStreamChunked123!",
+        "full_name": "Stream Chunked User",
+    })
+    token = reg.json()["access_token"]
+
+    await client.post("/api/v1/profile", json={
+        "full_name": "Stream Chunked User",
+        "email": "stream_chunked_user@example.com",
+        "location_city": "Mérida",
+        "location_country": "México",
+    }, headers={"Authorization": f"Bearer {token}"})
+
+    # Generador de flujo chunked que supera los 5.5 MB (6 chunks de 1 MB = 6 MB)
+    async def stream_generator():
+        yield b'{"raw_text": "'
+        chunk = b"X" * (1024 * 1024)
+        for _ in range(6):
+            yield chunk
+        yield b'", "filename": "test.txt"}'
+
+    headers = {
+        "content-type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    res = await client.post("/api/v1/profile/sources/import", content=stream_generator(), headers=headers)
+    assert res.status_code == 413
+    data = res.json()
+    assert "excede el tamaño máximo permitido" in data["detail"]
+    assert "recibidos" in data["detail"]
+
+
+
+
+@pytest.mark.asyncio
+async def test_api_cv_import_with_distinct_skill_levels_preserves_correct_association(client: AsyncClient):
+    """
+    Regresión API Hito 2.1: Verifica que a través de la API, un CV con
+    'Python básico, JavaScript avanzado' asocie beginner a Python y advanced a JavaScript,
+    sin inventar años ni niveles por defecto y con estado pending de revisión humana.
+    """
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "skill_levels_user@example.com",
+        "password": "PasswordSkill123!",
+        "full_name": "Skill Levels User",
+    })
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    await client.post("/api/v1/profile", json={
+        "full_name": "Skill Levels User",
+        "email": "skill_levels_user@example.com",
+        "location_city": "Guadalajara",
+        "location_country": "México",
+    }, headers=headers)
+
+    cv_text = (
+        "Candidato: Laura Morales\n"
+        "Email: laura@example.com\n"
+        "Habilidades principales: Python básico, JavaScript avanzado.\n"
+    )
+
+    import_res = await client.post("/api/v1/profile/sources/import", json={
+        "filename": "cv_laura.txt",
+        "raw_text": cv_text,
+    }, headers=headers)
+    assert import_res.status_code == 201
+    data = import_res.json()
+
+    skills = data["pending_skills"]
+    assert len(skills) == 2
+
+    skills_dict = {s["name"].lower(): s for s in skills}
+    assert "python" in skills_dict
+    assert "javascript" in skills_dict
+
+    # Verificación estricta de niveles locales
+    py_skill = skills_dict["python"]
+    js_skill = skills_dict["javascript"]
+
+    assert py_skill["proficiency"] == "beginner", f"Python esperaba 'beginner', obtuvo {py_skill['proficiency']}"
+    assert py_skill["years_experience"] is None, "Años no declarados deben ser None"
+    assert py_skill["verification_status"] == "pending"
+
+    assert js_skill["proficiency"] == "advanced", f"JavaScript esperaba 'advanced', obtuvo {js_skill['proficiency']}"
+    assert js_skill["years_experience"] is None, "Años no declarados deben ser None"
+    assert js_skill["verification_status"] == "pending"
+
 

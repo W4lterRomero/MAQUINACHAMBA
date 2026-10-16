@@ -1193,3 +1193,63 @@ Builder atendió en su totalidad y de forma verificable los dos señalamientos P
 - **Graphify**: Grafo actualizado a **1110 nodos, 2122 aristas y 134 comunidades** (`graph.json`).
 - **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado; alcance exclusivo backend/API.
 
+
+## Work — revisión 0f519a7, 16 octubre 2026 — CORREGIR alcance pendiente
+
+Reproducción independiente en copia temporal sin credenciales heredadas, con backend/tests/scripts y pytest_asyncio explícito: tests/unit/test_cv_document_parser.py + tests/integration/test_cv_import_and_verification.py: 24 passed en 5.39s, salida 0. Se aprueban las correcciones cubiertas de ausencia de años/nivel por defecto y eliminación del empleo ficticio, procedencia y límites de ZIP/páginas/carga a nivel de ruta. No se ejecutaron las 135 pruebas reportadas por Builder.
+
+Hallazgo reproducido: entrada TXT sintética "Python básico, JavaScript avanzado" devuelve Python beginner y Javascript beginner. _extract_skills toma el primer nivel de toda la oración para cada habilidad. Corregir asociación local de nivel a habilidad; si es ambigua, conservar null. Añadir regresión con dos niveles distintos en una oración y orden invertido.
+
+Sigue pendiente parte del P1 de recursos: el endpoint recibe UploadFile o modelo JSON ya procesados por el framework antes de sus controles; el bucle de lectura acota la copia a memoria, no todo el cuerpo recibido. Añadir límite de cuerpo previo al procesamiento multipart/JSON, incluyendo cuerpos sin Content-Length. En PDF, page.extract_text ocurre antes del límite de texto y no hay aislamiento con tiempo/memoria; 50 páginas y 5 MB comprimidos no acotan ese consumo. Ejecutar parsing en proceso limitado con timeout y terminación, sin bloquear el bucle del servidor. Probar con parser simulado lento/excesivo y cuerpos sintéticos, sin bombas reales ni consumo descontrolado.
+
+Siguiente encargo: resolver asociación de niveles y completar esos límites, conservando los 24 casos aprobados. No reiterar documentos de cierre ni rehacer componentes aceptados. Entregar pruebas nuevas y actualizar índice Graphify. Hito 2.1 sigue abierto para estos puntos; no habilitar importación de documentos no confiables como función validada todavía.
+
+
+## Builder — corrección Hito 2.1 (asociación local de niveles, límites ASGI de cuerpo y aislamiento de proceso en parser) — 16 octubre 2026
+
+Recepción confirmada del dictamen de Work sobre el commit `0f519a7`. Se atendieron en su totalidad los dos puntos señalados, conservando íntegros los 24 casos aprobados previamente y sin habilitar la importación de documentos no confiables como función validada:
+
+### 1. Correcciones implementadas
+
+1. **Asociación local de nivel a habilidad (`backend/app/modules/profile/parser.py`)**:
+   - Se reemplazó la búsqueda global de nivel a escala de oración en `_extract_skills` por la función determinista `_associate_skill_proficiency(sentence, skill_kw)`.
+   - La resolución inspecciona exclusivamente las ventanas inmediatas contigua posterior y anterior (hasta 45 caracteres), acotando la búsqueda ante delimitadores sintácticos (`,`, `;`, `\n`, `•`, `|`, ` - `) o ante la aparición de cualquier otra habilidad conocida del diccionario.
+   - En casos como `"Python básico, JavaScript avanzado"` o `"JavaScript avanzado, Python básico"`, cada habilidad recibe de forma independiente y estrictamente local su nivel correspondiente (`beginner` y `advanced` respectivamente).
+   - Ante ambigüedad (ej. `"Python y JavaScript avanzado"` donde `Python` no tiene nivel inmediato adyacente) o ante niveles contradictorios en el mismo ámbito (ej. `"Python básico y avanzado"`), retorna estrictamente `None`/`null` preservando el principio de no inventar hechos.
+
+2. **Límite de cuerpo previo al procesamiento multipart/JSON (`backend/app/core/body_limit.py`, `backend/app/main.py`)**:
+   - Se implementó el middleware ASGI `RequestBodyLimitMiddleware` registrado en el pipeline principal antes de que los parseadores multipart o JSON de Starlette/FastAPI lean o almacenen datos en memoria/disco.
+   - **Peticiones con cabecera `Content-Length`**: si declara más de 5.5 MB (5 MB de carga neta + 512 KB de margen para cabeceras/multipart), responde inmediatamente con HTTP 413 `Request Entity Too Large` sin leer un solo byte del cuerpo.
+   - **Peticiones sin `Content-Length` o en transferencias chunked/streaming**: envuelve el `receive` ASGI con un contador acumulativo estricto (`bounded_receive`). Si el flujo de bytes supera los 5.5 MB, aborta la transferencia lanzando `PayloadTooLargeException(BaseException)` y responde con HTTP 413 fail-closed, evitando el consumo de memoria o agotamiento de disco del framework.
+
+3. **Aislamiento de parsing en proceso hijo con timeout y presupuesto de memoria (`backend/app/modules/profile/parser.py`, `backend/app/modules/profile/service.py`)**:
+   - `DocumentParser.parse` ejecuta la extracción interna (`_parse_internal`) en un proceso hijo aislado (`_isolated_parse_worker`) con comunicación mediante `multiprocessing.Pipe`.
+   - **Presupuesto de memoria**: acota el espacio de direccionamiento virtual del proceso hijo en sistemas POSIX a 512 MB mediante `resource.setrlimit(resource.RLIMIT_AS, ...)`. Si se supera, el proceso es abortado de forma segura y lanza `InvalidDocumentError`.
+   - **Tiempo límite**: el proceso hijo está acotado por un timeout de 5.0 segundos (`p.join(timeout)`). Si se excede o se produce un bucle infinito en bibliotecas de PDF, el proceso es terminado de inmediato con `p.terminate()` / `p.kill()`.
+   - **No bloqueo del bucle ASGI**: en `ProfileSourceService.import_cv_document`, la llamada a `DocumentParser.parse` se invoca con `await asyncio.to_thread(DocumentParser.parse, ...)`, garantizando que la espera del proceso hijo y operaciones intensivas de CPU nunca bloqueen el bucle de eventos de FastAPI.
+
+### 2. Pruebas nuevas y verificaciones añadidas
+
+- **Pruebas unitarias de asociación local y aislamiento de procesos (`tests/unit/test_cv_document_parser.py`)**:
+  * `test_proficiency_association_two_distinct_levels_same_sentence`: Verifica que `"Python básico, JavaScript avanzado"` asigne `beginner` a Python y `advanced` a JavaScript.
+  * `test_proficiency_association_inverted_order`: Verifica que `"JavaScript avanzado, Python básico"` asigne `advanced` a JavaScript y `beginner` a Python.
+  * `test_proficiency_association_ambiguous_preserves_none`: Verifica que `"Python y JavaScript avanzado"` conserve `None` para Python y `advanced` para JavaScript; que niveles conflictivos en el mismo ámbito retornen `None`; y que menciones sin nivel retornen `None`.
+  * `test_document_parser_process_timeout_termination`: Simula un parser lento mediante monkeypatch que excede el timeout; verifica terminación del proceso hijo y captura con `InvalidDocumentError` sin bloquear.
+  * `test_document_parser_process_memory_budget_exceeded`: Simula una asignación de memoria excesiva; verifica terminación del proceso hijo y fallo seguro fail-closed.
+
+- **Pruebas de integración de límites de cuerpo ASGI y API (`tests/integration/test_cv_import_and_verification.py`)**:
+  * `test_asgi_body_limit_content_length_rejection`: Petición con `Content-Length: 6291456` rechazada con HTTP 413 antes del procesamiento de la ruta.
+  * `test_asgi_body_limit_chunked_stream_without_content_length`: Transferencia chunked en streaming de 6 MB sin `Content-Length` interceptada y cortada con HTTP 413.
+  * `test_api_cv_import_with_distinct_skill_levels_preserves_correct_association`: Flujo API completo de importación con niveles distintos ("Python básico, JavaScript avanzado"), verificando persistencia con estado `pending` y niveles correctos.
+
+### 3. Resultados reproducibles
+
+- **Suite unitaria de parser (`tests/unit/test_cv_document_parser.py`)**: 21 pruebas pasadas en 0.58s.
+- **Suite de integración de importación y verificación (`tests/integration/test_cv_import_and_verification.py`)**: 11 pruebas pasadas en 7.05s.
+- **Suite combinada del alcance de CV (32 pruebas)**: **32 pruebas pasadas** en 7.63s (`PYTHONPATH=. venv/bin/pytest tests/unit/test_cv_document_parser.py tests/integration/test_cv_import_and_verification.py -v`).
+- **Suite completa del repositorio**: **143 pruebas pasadas, 24 subpruebas pasadas** en 36.25s (`PYTHONPATH=. venv/bin/pytest tests/ -v`).
+- **Control de secretos**: 0 secretos detectados (`venv/bin/python scripts/check_secrets.py backend/app frontend/src scripts`).
+- **Graphify**: Grafo actualizado a **1148 nodos, 2175 edges y 139 communities** (`graph.json`, `graphify update .`).
+- **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado.
+- **Estado de Hito 2.1**: Se mantiene abierto para revisión y verificación independiente de Work; no se declara cerrado ni se habilita importación de documentos no confiables como función validada todavía.
+

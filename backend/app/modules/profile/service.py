@@ -8,6 +8,7 @@ Principios clave:
 5. Ningún hecho sin verificar ('pending' o 'rejected') se incorpora a candidaturas.
 """
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from sqlalchemy import select, and_
@@ -42,8 +43,12 @@ class ProfileSourceService:
         if not profile:
             raise ValueError(f"Perfil {profile_id} no encontrado en el tenant {tenant_id}.")
 
-        # 2. Parseo y extracción determinista (fail-closed)
-        extracted_doc = DocumentParser.parse(file_bytes=file_bytes, filename=filename)
+        # 2. Parseo y extracción determinista (fail-closed, ejecutado en hilo para no bloquear el bucle)
+        extracted_doc = await asyncio.to_thread(
+            DocumentParser.parse,
+            file_bytes=file_bytes,
+            filename=filename,
+        )
 
         # 3. Determinar el tipo de fuente
         ext = filename.lower().split(".")[-1] if "." in filename else "raw"
