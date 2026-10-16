@@ -544,6 +544,20 @@ def main():
         cdp.capture_screenshot(scr4)
         print(f"  Screenshot guardado: {scr4.name} ({scr4.stat().st_size} bytes)")
 
+        # Verificación negativa UI: comprobar que assert_visible rechaza estrictamente si la pestaña estuviera oculta
+        cdp.evaluate("document.getElementById('tab-approvals').style.display = 'none'")
+        assert not cdp.is_visible("#tab-approvals")
+        assert not cdp.is_visible("#btnApproveCandidacy")
+        neg_rejected = False
+        try:
+            cdp.assert_visible("#btnApproveCandidacy", "Prueba negativa pestaña oculta")
+        except AssertionError:
+            neg_rejected = True
+        finally:
+            cdp.evaluate("document.getElementById('tab-approvals').style.display = ''")
+        assert neg_rejected, "Fallo de aserción negativa: assert_visible NO rechazó el botón en pestaña de revisión oculta"
+        print("  Verificación negativa UI demostrada: assert_visible rechazó con éxito la pestaña oculta (display: none).")
+
         # Paso 2.5: Aprobación explícita mediante botón
         print("\n  [UI 5/6] Aprobación humana mediante botón visible 'Aprobar para Mañana 🚀'...")
         cdp.click("#btnApproveCandidacy")

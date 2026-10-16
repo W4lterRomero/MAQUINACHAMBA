@@ -62,7 +62,11 @@ class MockPortalAdapter:
         idempotency_key: Optional[str] = None,
         event: str = "submit_application",
     ) -> None:
-        """Registra la llamada en un archivo compartido inter-proceso protegido por file lock."""
+        """
+        Registra la llamada en un archivo compartido inter-proceso protegido por file lock.
+        Cuando MAQUINACHAMBA_PORTAL_LOG_FILE está configurado, propaga cualquier error
+        de escritura o permisos (fail-closed) para evitar registros falsos u ocultar fallos.
+        """
         log_path_str = os.environ.get("MAQUINACHAMBA_PORTAL_LOG_FILE")
         if not log_path_str:
             return
@@ -76,36 +80,40 @@ class MockPortalAdapter:
             "idempotency_key": idempotency_key,
             "event": event,
         }
-        try:
-            with open(log_path, "a", encoding="utf-8") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                try:
-                    f.write(json.dumps(record) + "\n")
-                    f.flush()
-                    os.fsync(f.fileno())
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
+        with open(log_path, "a", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(json.dumps(record) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     @classmethod
     def get_recorded_calls(cls, log_path: Path) -> List[Dict[str, Any]]:
-        """Lee el registro inter-proceso de llamadas con file lock compartido."""
+        """
+        Lee el registro inter-proceso de llamadas con file lock compartido.
+        Falla explícitamente ante errores de lectura o líneas corruptas de JSON (fail-closed).
+        """
         if not log_path.exists():
             return []
         calls = []
-        try:
-            with open(log_path, "r", encoding="utf-8") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                try:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            calls.append(json.loads(line))
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
+        with open(log_path, "r", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            try:
+                for line_num, line in enumerate(f, start=1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        calls.append(record)
+                    except json.JSONDecodeError as err:
+                        raise ValueError(
+                            f"Línea corrupta en log de portal {log_path}:{line_num}: '{line}'. Error: {err}"
+                        ) from err
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         return calls
 
     @classmethod
