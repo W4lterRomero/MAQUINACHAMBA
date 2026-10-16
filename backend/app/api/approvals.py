@@ -296,3 +296,46 @@ async def modify_candidacy(
             raise HTTPException(status_code=404, detail=str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
 
+
+@router.get("/{candidacy_id}/export/{format_type}")
+async def export_candidacy_cv(
+    candidacy_id: str,
+    format_type: str,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Exporta el documento curricular adaptado vinculado a la candidatura (REQ-013).
+    Garantiza inmutabilidad y previene sustituciones silenciosas de paquetes aprobados.
+    """
+    from backend.app.modules.cv.service import (
+        CVService,
+        CVServiceError,
+        CVServiceNotFoundError,
+        CVServiceImmutableError,
+    )
+    from fastapi import Response
+
+    try:
+        content_bytes, filename, media_type, file_hash = await CVService.export_candidacy_cv(
+            session=session,
+            tenant_id=tenant_id,
+            candidacy_id=candidacy_id,
+            format_type=format_type,
+        )
+        return Response(
+            content=content_bytes,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Document-Hash": file_hash,
+            },
+        )
+    except CVServiceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except CVServiceImmutableError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except CVServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+

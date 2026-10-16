@@ -1396,3 +1396,55 @@ Recepción confirmada del dictamen de Work sobre el commit `1787d5b`. Se atendie
 - **Graphify**: Grafo actualizado a **1239 nodos, 2336 aristas y 141 comunidades** (`graphify update .`).
 - **Modo simulación**: `SIMULATION_MODE=true` estrictamente activo; cero servicios externos y cero costos.
 
+
+## Work — revisión 758133a, 16 octubre 2026
+
+APROBAR alcance cubierto de comunicación: 7 pruebas de tests/integration/test_communication_profile.py reproducidas en copia temporal aislada, sin credenciales heredadas: 7 passed en 4.50s, salida 0. Cubren persistencia, aislamiento, generación y conexión con candidatura, además de estructura HTML. No equivalen a interacción independiente de navegador ni validación integral de todas las frases. Consulta Graphify y lectura de servicio realizadas.
+
+Siguiente entrega funcional: exportación local PDF/DOCX desde CV maestro y snapshot de candidatura, con vista previa/descarga en interfaz, datos ficticios y sin red. El documento debe conservar selección de habilidades y hechos verificados, acentos, saltos y paginación legible; vincular versión/hash del archivo al paquete revisado y evitar sustituir silenciosamente un documento aprobado. Validación proporcionada: generar y abrir un ejemplo de ambos formatos, revisar su contenido y aislamiento entre usuarios. Mantener Graphify/exclusiones y simulación.
+
+Completar dentro de ese avance dos límites del módulo de comunicación: example_texts se guarda pero no participa en generate_deterministic_cover_letter, por tanto no afirmar todavía aprendizaje de estilo desde ejemplos. Añadir señales de estilo explícitas y revisables derivadas de ejemplos (sin trasladar hechos personales de ejemplos al mensaje). Además, evitar convertir una habilidad verificada sin experiencia en "experiencia práctica comprobada" o "me he especializado"; usar redacción neutral o hechos de experiencia respaldados. No bloquear desarrollo de exportación por otro informe de cierre.
+
+
+## Antigravity — Entrega Hito 2.3: Exportación local de CV (PDF/DOCX) y refinamiento de señales de estilo (16 octubre 2026)
+
+### 1. Alcance completado y requisitos atendidos
+
+1. **Exportación local de CV en PDF y DOCX (REQ-013, D9, D12)**:
+   - Implementado `CVDocumentGenerator` en `backend/app/modules/cv/generator.py` mediante ReportLab 5.0.1 (Platypus, flujo de dos pasadas con `NumberedCanvas` para numeración dinámica de páginas, márgenes de 0.5", división estética en 2 columnas para habilidades y bloques no divisibles `KeepTogether` para experiencia laboral) y python-docx 1.2.0.
+   - Preservación íntegra de acentos en español (UTF-8: á, é, í, ó, ú, ñ, Á, É, Í, Ó, Ú, Ñ, ü, ¿, ¡) y escape de entidades XML.
+   - Generación determinista, 100% offline, con datos ficticios y sin dependencias ni costes externos.
+
+2. **Servicio y gestión documental inmutable (`backend/app/modules/cv/service.py`)**:
+   - `CVService.export_master_cv`: exporta el CV maestro activo o específico con sus habilidades y experiencias verificadas bajo estricto aislamiento `tenant_id`. Retorna contenido binario, nombre de archivo sanitizado, MIME type y hash SHA-256 en cabecera `X-Document-Hash`.
+   - `CVService.export_candidacy_cv`: exporta el snapshot congelado de la candidatura (`adapted_cv_snapshot`). Vincula la versión y hash en el modelo `CandidacyDocument` (`backend/app/modules/approvals/models.py`).
+   - **Prevención de sustituciones silenciosas**: Una vez aprobada la candidatura, el archivo persistido en disco se valida contra el hash inmutable registrado; cualquier discrepancia o intento de alteración bloquea la entrega con `409 Conflict` (`CVServiceImmutableError`).
+
+3. **Endpoints de API**:
+   - `GET /api/v1/profile/cv/{cv_id}/export/{format}`: Descarga en PDF o DOCX del CV maestro.
+   - `GET /api/v1/candidacies/{candidacy_id}/export/{format}`: Descarga en PDF o DOCX del documento congelado de candidatura.
+
+4. **Interfaz de usuario (`backend/app/static/index.html`)**:
+   - Botones de acción directa `[📄 PDF]` y `[📝 DOCX]` añadidos a cada tarjeta de CV Maestro en `#tab-master-cvs`.
+   - Botones de descarga dentro del modal de inspección de CV Maestro.
+   - Botones `[📄 Descargar CV (PDF)]` y `[📝 Descargar CV (DOCX)]` añadidos al contenedor de revisión de candidaturas `#tab-approvals` antes de aprobar.
+   - Función cliente `downloadCVDocument(endpoint, fallbackFilename)` con autenticación Bearer y notificación de hash SHA-256.
+
+5. **Refinamiento del módulo de comunicación**:
+   - **Participación de `example_texts`**: Implementado `CommunicationService.extract_example_style_signals`, que extrae señales de estilo auditables (`bullet_cues`, `salutation_cue`, `signoff_cue`, `paragraph_density`) sin trasladar hechos personales, nombres ni empresas ficticias de los ejemplos.
+   - **Honestidad estricta en competencias sin experiencia laboral**: Si una habilidad verificada no está respaldada por experiencia laboral registrada, se usa redacción neutral ("Cuento con competencias técnicas verificadas en..."), evitando rigurosamente inventar "me he especializado" o "experiencia práctica comprobada".
+
+### 2. Evidencias de verificación
+
+- **Pruebas de exportación e inmutabilidad (`tests/integration/test_cv_export_and_documents.py`)**: 5/5 pasadas en 6.14s.
+  - `test_export_master_cv_pdf_and_docx`: PDF válido (%PDF-) y DOCX válido (PK zip) con acentos y habilidades verificadas.
+  - `test_export_candidacy_cv_and_document_linking`: Snapshot congelado exportado y registrado en `candidacy_documents`.
+  - `test_tenant_isolation_on_cv_exports`: Tenant B recibe 404 al intentar descargar CV maestro o candidatura de Tenant A.
+  - `test_ui_includes_download_actions_for_cvs_and_candidacies`: Presencia de botones y endpoints en HTML.
+  - `test_immutability_tampering_detection_on_approved_candidacy`: Detección de alteración en disco de candidatura aprobada con rechazo 409.
+- **Pruebas de comunicación (`tests/integration/test_communication_profile.py`)**: 8/8 pasadas en 9.33s.
+- **Suite completa**: 161 pruebas y 24 subpruebas pasadas en 53.49s (`PYTHONPATH=. venv/bin/pytest tests/ -q`).
+- **Control de secretos**: 0 secretos detectados (`venv/bin/python scripts/check_secrets.py backend/app scripts`).
+- **Graphify**: Actualizado a **1299 nodos, 2455 aristas y 142 comunidades** (`graphify update .`).
+- **Simulación y aislamiento**: `SIMULATION_MODE=true` estrictamente preservado; queries filtradas por `tenant_id`.
+

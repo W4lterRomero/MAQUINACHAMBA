@@ -1484,7 +1484,9 @@
             <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">
               ${c.summary || 'Sin resumen profesional definido.'}
             </p>
-            <div style="display: flex; gap: 0.5rem; justify-content: flex-end; border-top: 1px solid var(--card-border); padding-top: 0.75rem;">
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end; border-top: 1px solid var(--card-border); padding-top: 0.75rem; flex-wrap: wrap;">
+              <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/profile/cv/${c.id}/export/pdf', '${c.name}.pdf')">📄 PDF</button>
+              <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/profile/cv/${c.id}/export/docx', '${c.name}.docx')">📝 DOCX</button>
               ${!c.is_active ? `<button class="btn btn-outline btn-sm" onclick="selectMasterCV('${c.id}')">★ Activar</button>` : ''}
               <button class="btn btn-outline btn-sm" onclick="inspectMasterCV('${c.id}')">👁 Inspeccionar</button>
               <button class="btn btn-outline btn-sm" onclick="editMasterCV('${c.id}')">✎ Editar</button>
@@ -1643,8 +1645,12 @@
             ${skillsHtml}
           </div>
           <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem;">Experiencias Verificadas Vinculadas (${data.verified_experiences.length})</h4>
-          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;">
             ${expHtml}
+          </div>
+          <div style="display: flex; gap: 0.5rem; border-top: 1px solid var(--card-border); padding-top: 1rem; justify-content: flex-end;">
+            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/profile/cv/${cv.id}/export/pdf', '${cv.name}.pdf')">📄 Descargar PDF</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/profile/cv/${cv.id}/export/docx', '${cv.name}.docx')">📝 Descargar DOCX</button>
           </div>
         `;
 
@@ -1747,12 +1753,56 @@
               <pre id="preCvSnapshot" style="background: #0f172a; padding: 1rem; border-radius: 0.375rem; border: 1px solid var(--card-border); font-size: 0.8rem; overflow: auto; height: 140px;">${JSON.stringify(c.adapted_cv_snapshot, null, 2)}</pre>
             </div>
           </div>
-          <div style="display: flex; gap: 1rem; justify-content: flex-end; border-top: 1px solid var(--card-border); padding-top: 1rem;">
+          <div style="display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center; border-top: 1px solid var(--card-border); padding-top: 1rem; flex-wrap: wrap;">
+            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/candidacies/${c.id}/export/pdf', 'Candidatura_${c.id.substring(0,8)}_CV.pdf')">📄 Descargar CV (PDF)</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/candidacies/${c.id}/export/docx', 'Candidatura_${c.id.substring(0,8)}_CV.docx')">📝 Descargar CV (DOCX)</button>
             <button id="btnRejectCandidacy" class="btn btn-danger btn-sm" onclick="rejectCandidacy('${c.id}')">Rechazar Definitivamente</button>
             <button id="btnApproveCandidacy" class="btn btn-success" onclick="approveCandidacy('${c.id}')">Aprobar para Mañana 🚀</button>
           </div>
         </div>
       `;
+    }
+
+    async function downloadCVDocument(endpoint, fallbackFilename) {
+      if (!authToken) {
+        showToast("Inicia sesión para descargar documentos.", "error");
+        return;
+      }
+      try {
+        const response = await fetch(endpoint, {
+          headers: {
+            "Authorization": `Bearer ${authToken}`
+          }
+        });
+        if (!response.ok) {
+          const errJson = await response.json().catch(() => ({}));
+          showToast(errJson.detail || "Error al descargar el documento.", "error");
+          return;
+        }
+        const blob = await response.blob();
+        let filename = fallbackFilename;
+        const disp = response.headers.get("Content-Disposition");
+        if (disp && disp.includes("filename=")) {
+          const match = disp.match(/filename="?([^";]+)"?/);
+          if (match && match[1]) filename = match[1];
+        }
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        const docHash = response.headers.get("X-Document-Hash");
+        if (docHash) {
+          showToast(`Descarga lista (SHA-256: ${docHash.substring(0, 10)}...)`, "success");
+        } else {
+          showToast("Documento descargado con éxito.", "success");
+        }
+      } catch (err) {
+        showToast("Error de conexión al descargar documento.", "error");
+      }
     }
 
     async function approveCandidacy(id) {

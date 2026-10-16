@@ -20,7 +20,7 @@ passlib[bcrypt]>=1.7.4
 # Document processing and generation (Phase 2)
 python-docx>=1.1.0
 pypdf>=5.0.0
-# reportlab>=4.2.0
+reportlab>=4.2.0
 
 # AI providers (BYOK - Phase 2)
 # litellm>=1.50.0

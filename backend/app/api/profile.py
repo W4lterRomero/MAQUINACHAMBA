@@ -462,6 +462,44 @@ async def select_master_cv(
     return {"status": "active", "id": cv.id, "name": cv.name}
 
 
+@router.get("/cv/{cv_id}/export/{format_type}")
+async def export_master_cv(
+    cv_id: str,
+    format_type: str,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Exporta un CV maestro en PDF o DOCX con encabezados y hash SHA-256 (REQ-013).
+    """
+    from backend.app.modules.cv.service import (
+        CVService,
+        CVServiceError,
+        CVServiceNotFoundError,
+    )
+    from fastapi import Response
+
+    try:
+        content_bytes, filename, media_type, file_hash = await CVService.export_master_cv(
+            session=session,
+            tenant_id=tenant_id,
+            cv_id=cv_id,
+            format_type=format_type,
+        )
+        return Response(
+            content=content_bytes,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Document-Hash": file_hash,
+            },
+        )
+    except CVServiceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except CVServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/verify", status_code=status.HTTP_200_OK)
 async def mark_profile_verified(
     session: AsyncSession = Depends(get_session),

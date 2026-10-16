@@ -151,3 +151,24 @@ class ExecutionLog(Base):
         DateTime(timezone=True), nullable=True
     )
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class CandidacyDocument(Base):
+    """
+    Documento generado para una candidatura (PDF, DOCX, etc.).
+    Vincula versión, ruta de almacenamiento local y hash SHA-256 al paquete revisado.
+    Garantiza inmutabilidad y previene sustituciones silenciosas.
+    """
+
+    __tablename__ = "candidacy_documents"
+
+    candidacy_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("candidacies.id"), nullable=False, index=True
+    )
+    document_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # cv_pdf, cv_docx, cover_letter
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    file_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+

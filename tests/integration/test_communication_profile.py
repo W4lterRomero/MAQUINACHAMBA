@@ -380,3 +380,99 @@ async def test_communication_profile_ui_elements_served(client: AsyncClient):
         assert 'id="btnPreviewToneCasual"' in html
 
 
+@pytest.mark.asyncio
+async def test_example_style_signals_and_unbacked_skills_honesty(client: AsyncClient):
+    """
+    Verifica:
+    1. Las señales de estilo derivadas de example_texts participan en la generación
+       (viñetas, despedida atenta/cordial) sin trasladar entidades o hechos ficticios del ejemplo.
+    2. Cuando una habilidad verificada no tiene experiencia laboral respaldada,
+       la redacción es estrictamente neutral y jamás inventa 'experiencia práctica comprobada'
+       ni 'me he especializado'.
+    """
+    uid = uuid.uuid4().hex[:8]
+    reg_res = await client.post("/api/v1/auth/register", json={
+        "email": f"signals_{uid}@example.com",
+        "password": "Password123!",
+        "full_name": "Elena Verdadera",
+    })
+    token = reg_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Perfil con solo habilidades verificadas (SIN experiencia laboral previa)
+    await client.post("/api/v1/profile", json={
+        "full_name": "Elena Verdadera",
+        "email": f"signals_{uid}@example.com",
+        "location_city": "Bogotá",
+        "location_country": "Colombia",
+    }, headers=headers)
+
+    cv_raw = (
+        "Elena Verdadera\n"
+        "Bogotá, Colombia\n\n"
+        "Habilidades:\n"
+        "- Python intermedio\n"
+        "- FastAPI básico\n"
+    )
+    await client.post("/api/v1/profile/sources/import", json={
+        "source_type": "cv_text",
+        "source_name": "CV_Elena.txt",
+        "raw_text": cv_raw,
+    }, headers=headers)
+
+    pending_skills_res = await client.get("/api/v1/profile/items/pending", headers=headers)
+    for s in pending_skills_res.json()["pending_skills"]:
+        await client.post(f"/api/v1/profile/items/skills/{s['id']}/review", json={"decision": "accept"}, headers=headers)
+
+    await client.post("/api/v1/profile/verify", headers=headers)
+
+    # Configurar estilo con ejemplos que usan viñetas y despedida formal 'Atentamente'
+    # El ejemplo cita hechos ajenos ficticios que NUNCA deben copiarse
+    await client.post("/api/v1/communication", json={
+        "tone": "semiformal",
+        "example_texts": [
+            {
+                "title": "Carta previa en TechGlobal SA",
+                "content": (
+                    "Estimada directora:\n"
+                    "En mis proyectos anteriores con EmpresaFalsa99 logré:\n"
+                    "- Optimización de latencia en 50%\n"
+                    "- Automatización de despliegues\n\n"
+                    "Atentamente,\n"
+                    "Candidato Ejemplo"
+                ),
+            }
+        ],
+    }, headers=headers)
+
+    prev_res = await client.post("/api/v1/communication/preview", json={
+        "custom_vacancy_title": "Desarrollador Junior",
+        "custom_company_name": "Acme Tech",
+    }, headers=headers)
+    assert prev_res.status_code == 200
+    data = prev_res.json()
+    text = data["preview_text"]
+
+    # 1. Señales de estilo de ejemplos aplicadas
+    assert "example_style_signals_applied" in data["rules_applied"]
+    assert "example_signal_bullet_cues" in data["rules_applied"]
+    assert "example_signal_signoff_attentive" in data["rules_applied"]
+    assert data["facts_used"]["example_style_signals"]["bullet_cues"] is True
+    assert data["facts_used"]["example_style_signals"]["signoff_cue"] == "attentive"
+
+    # 2. Hechos ajenos del ejemplo NUNCA trasladados
+    assert "EmpresaFalsa99" not in text
+    assert "Optimización de latencia" not in text
+    assert "Candidato Ejemplo" not in text
+
+    # 3. Honestidad estricta en habilidades sin experiencia laboral:
+    # No inventa 'experiencia práctica comprobada' ni 'me he especializado'
+    assert "me he especializado" not in text
+    assert "experiencia práctica comprobada" not in text
+    assert "Cuento con las siguientes competencias técnicas verificadas:" in text
+    assert "• Competencia verificada: Python" in text
+
+    # 4. Despedida atenta preservada de la señal del ejemplo
+    assert "Le saluda atentamente,\nElena Verdadera" in text
+
+

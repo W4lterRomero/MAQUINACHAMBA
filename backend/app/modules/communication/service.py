@@ -170,6 +170,68 @@ class CommunicationService:
         return comm_profile
 
     @classmethod
+    def extract_example_style_signals(
+        cls, example_texts: Optional[List[Dict[str, Any]]]
+    ) -> Dict[str, Any]:
+        """
+        Extrae señales explícitas y revisables de estilo a partir de los ejemplos proporcionados por el usuario.
+        REGLA DE ORO DE SEGURIDAD Y VERACIDAD:
+        - NUNCA traslada hechos personales, nombres, empresas, cargos o contenidos literales de los ejemplos al mensaje generado.
+        - Extrae únicamente parámetros estilísticos y estructurales observables:
+          * bullet_cues (bool): si el usuario acostumbra usar viñetas ('-', '*', '•', '1.').
+          * salutation_cue (Optional[str]): 'direct_recipient' | 'team_friendly' | 'formal' | None.
+          * signoff_cue (Optional[str]): 'attentive' | 'cordial' | 'warm' | None.
+          * paragraph_density (str): 'compact' | 'standard'.
+        """
+        signals: Dict[str, Any] = {
+            "has_examples": False,
+            "bullet_cues": False,
+            "salutation_cue": None,
+            "signoff_cue": None,
+            "paragraph_density": "standard",
+        }
+        if not example_texts:
+            return signals
+
+        combined_text = "\n\n".join(
+            str(ex.get("content", "")) for ex in example_texts if isinstance(ex, dict)
+        )
+        if not combined_text.strip():
+            return signals
+
+        signals["has_examples"] = True
+
+        # 1. Señal de viñetas / estructura por puntos
+        if re.search(r"(?m)^\s*([-*•]|\d+\.)\s+", combined_text):
+            signals["bullet_cues"] = True
+
+        # 2. Señal de saludo observable
+        lower_text = combined_text.lower()
+        if re.search(r"\b(estimado/a\s+[a-záéíóúñ]+|a\s+la\s+atención\s+de)\b", lower_text):
+            signals["salutation_cue"] = "direct_recipient"
+        elif re.search(r"\b(hola\s+equipo|buen\s+día\s+equipo|saludos\s+al\s+equipo)\b", lower_text):
+            signals["salutation_cue"] = "team_friendly"
+        elif re.search(r"\b(estimado\s+equipo|distinguido)\b", lower_text):
+            signals["salutation_cue"] = "formal"
+
+        # 3. Señal de despedida observable
+        if re.search(r"\b(atentamente|le\s+saluda\s+atentamente|quedo\s+atento)\b", lower_text):
+            signals["signoff_cue"] = "attentive"
+        elif re.search(r"\b(saludos\s+cordiales|un\s+cordial\s+saludo|cordialmente)\b", lower_text):
+            signals["signoff_cue"] = "cordial"
+        elif re.search(r"\b(muchas\s+gracias|un\s+abrazo|saludos)\b", lower_text):
+            signals["signoff_cue"] = "warm"
+
+        # 4. Densidad de párrafos
+        paras = [p.strip() for p in combined_text.split("\n\n") if p.strip()]
+        if paras:
+            avg_words = sum(len(p.split()) for p in paras) / len(paras)
+            if avg_words < 30:
+                signals["paragraph_density"] = "compact"
+
+        return signals
+
+    @classmethod
     def generate_deterministic_cover_letter(
         cls,
         comm_profile: CommunicationProfile,
@@ -187,8 +249,12 @@ class CommunicationService:
         - CERO llamadas a IA externa (determinismo primero, REQ-011).
         - No inventa hechos profesionales: cita únicamente habilidades y experiencias verificadas.
         - Modela tono, concisión, foco de valor y reglas de redacción.
+        - Señales de estilo explícitas y revisables derivadas de ejemplos (sin copiar hechos ajenos).
         """
         rules_applied: List[str] = []
+
+        example_signals = cls.extract_example_style_signals(comm_profile.example_texts)
+
         facts_used: Dict[str, Any] = {
             "candidate_name": profile.full_name,
             "candidate_city": profile.location_city,
@@ -198,7 +264,17 @@ class CommunicationService:
             "verified_skills": list(verified_skills),
             "verified_experience": verified_experience_summary,
             "portfolio_url": portfolio_url,
+            "example_style_signals": example_signals,
         }
+
+        if example_signals["has_examples"]:
+            rules_applied.append("example_style_signals_applied")
+            if example_signals["bullet_cues"]:
+                rules_applied.append("example_signal_bullet_cues")
+            if example_signals["salutation_cue"]:
+                rules_applied.append(f"example_signal_salutation_{example_signals['salutation_cue']}")
+            if example_signals["signoff_cue"]:
+                rules_applied.append(f"example_signal_signoff_{example_signals['signoff_cue']}")
 
         tone = comm_profile.tone if comm_profile.tone in cls.VALID_TONES else "formal"
         rules = comm_profile.writing_rules or {}
@@ -215,17 +291,18 @@ class CommunicationService:
         rules_applied.append(f"conciseness_{conciseness}")
         rules_applied.append(f"focus_{focus_area}")
 
-        # 1. Saludo inicial
-        if tone == "formal":
-            if greeting_style == "recipient_direct":
-                greeting = f"Estimado/a responsable de selección de {company_name},"
-            else:
-                greeting = f"Estimado equipo de selección de {company_name},"
+        # 1. Saludo inicial (considera señal de saludo de ejemplos o cuestionario/tono)
+        sal_cue = example_signals.get("salutation_cue")
+        if sal_cue == "direct_recipient" or greeting_style == "recipient_direct":
+            greeting = f"Estimado/a responsable de selección de {company_name},"
+        elif sal_cue == "team_friendly" or greeting_style == "team_direct":
+            greeting = f"Hola equipo de {company_name},"
+        elif sal_cue == "formal":
+            greeting = f"Estimado equipo de selección de {company_name},"
+        elif tone == "formal":
+            greeting = f"Estimado equipo de selección de {company_name},"
         elif tone == "semiformal":
-            if greeting_style == "team_direct":
-                greeting = f"Hola equipo de {company_name},"
-            else:
-                greeting = f"Estimado equipo de {company_name},"
+            greeting = f"Estimado equipo de {company_name},"
         else:  # casual
             greeting = f"¡Hola equipo de {company_name}!"
 
@@ -245,17 +322,37 @@ class CommunicationService:
             )
 
         # 3. Párrafo de competencias y experiencia verificada (NUNCA INVENTAR)
+        has_experience = bool(verified_experience_summary)
         skills_phrase = ""
         if verified_skills:
             rules_applied.append("verified_skills_included")
             top_skills = verified_skills[:5]
             skills_str = ", ".join(top_skills[:-1]) + (" y " + top_skills[-1] if len(top_skills) > 1 else top_skills[0])
-            if tone == "formal":
-                skills_phrase = f"Cuento con competencias profesionales verificadas en {skills_str}."
-            elif tone == "semiformal":
-                skills_phrase = f"En mi trayectoria profesional me he especializado en {skills_str}."
+
+            # Si los ejemplos indican preferencia por viñetas
+            if example_signals.get("bullet_cues") and len(top_skills) >= 1:
+                rules_applied.append("bulleted_skills_formatted")
+                bullets = "\n".join(f"• Competencia verificada: {sk}" for sk in top_skills)
+                if has_experience:
+                    skills_phrase = f"Cuento con las siguientes competencias técnicas verificadas, respaldadas por mi experiencia:\n{bullets}"
+                else:
+                    skills_phrase = f"Cuento con las siguientes competencias técnicas verificadas:\n{bullets}"
             else:
-                skills_phrase = f"Tengo experiencia práctica comprobada trabajando con {skills_str}."
+                if has_experience:
+                    if tone == "formal":
+                        skills_phrase = f"Cuento con competencias técnicas verificadas en {skills_str}, respaldadas por mi trayectoria laboral."
+                    elif tone == "semiformal":
+                        skills_phrase = f"En mi trayectoria profesional he trabajado con {skills_str}."
+                    else:
+                        skills_phrase = f"Tengo experiencia práctica comprobada trabajando con {skills_str}."
+                else:
+                    # Redacción estrictamente neutral: evitar exagerar a 'experiencia práctica comprobada' o 'me he especializado'
+                    if tone == "formal":
+                        skills_phrase = f"Cuento con competencias técnicas verificadas en {skills_str}."
+                    elif tone == "semiformal":
+                        skills_phrase = f"Cuento con conocimientos técnicos verificados en {skills_str}."
+                    else:
+                        skills_phrase = f"Manejo competencias técnicas verificadas en {skills_str}."
         else:
             rules_applied.append("no_verified_skills_found_fallback_to_specialization")
             spec = (cv.specialization if cv and cv.specialization else "desarrollo y tecnología")
@@ -379,6 +476,15 @@ class CommunicationService:
             )
             signoff = f"Un saludo cordial,\n{profile.full_name}"
 
+        # Ajuste de despedida según señales explícitas de ejemplos si existen
+        signoff_cue = example_signals.get("signoff_cue")
+        if signoff_cue == "attentive":
+            signoff = f"Le saluda atentamente,\n{profile.full_name}"
+        elif signoff_cue == "cordial":
+            signoff = f"Saludos cordiales,\n{profile.full_name}"
+        elif signoff_cue == "warm":
+            signoff = f"Un saludo cordial,\n{profile.full_name}"
+
         # 7. Estructuración según concisión
         if conciseness == "concise":
             # 2 párrafos compactos
@@ -491,6 +597,7 @@ class CommunicationService:
             tone=active_tone,
             writing_rules=active_writing_rules,
             questionnaire_answers=active_questionnaire,
+            example_texts=comm_profile.example_texts,
         )
 
         letter, rules_applied, facts_used = cls.generate_deterministic_cover_letter(
