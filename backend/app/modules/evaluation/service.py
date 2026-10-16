@@ -35,9 +35,10 @@ class DeterministicEvaluationService:
         req_keywords = [str(r).lower().strip() for r in raw_reqs if str(r).strip()]
 
         # 2. Habilidades verificadas del perfil
-        # Solo consideramos habilidades con estado 'verified' o 'extracted' (pero dando mayor peso a verified)
+        # REGLA ESTRICTA (Hito 2.1): Ningún hecho sin verificar se incorpora a la evaluación.
+        # Solo consideramos habilidades con estado 'verified'. Habilidades 'pending' o 'rejected' se omiten.
         verified_skills_map = {
-            s.name.lower().strip(): s for s in skills if s.verification_status != "rejected"
+            s.name.lower().strip(): s for s in skills if s.verification_status == "verified"
         }
 
         # Regla 1: Coincidencia de habilidades

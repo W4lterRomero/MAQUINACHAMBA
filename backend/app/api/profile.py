@@ -3,14 +3,17 @@ Router para perfil profesional y CVs maestros (REQ-001, REQ-004).
 Permite configurar el perfil y CVs sin editar código.
 """
 
+import base64
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import get_session, get_tenant_id
-from backend.app.modules.profile.models import UserProfile, Skill, Experience
+from backend.app.modules.profile.models import UserProfile, Skill, Experience, ProfessionalSource
+from backend.app.modules.profile.parser import InvalidDocumentError
+from backend.app.modules.profile.service import ProfileSourceService
 from backend.app.modules.cv.models import MasterCV
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
@@ -22,7 +25,18 @@ class SkillCreate(BaseModel):
     category: str = "technical"
     proficiency: str = "intermediate"
     years_experience: float = 1.0
-    verification_status: str = "extracted"  # extracted, verified, rejected
+    verification_status: str = "pending"  # pending, verified, rejected
+
+
+class ItemReviewRequest(BaseModel):
+    decision: str  # accept, reject, modify
+    modifications: Optional[Dict[str, Any]] = None
+
+
+class CVImportJsonRequest(BaseModel):
+    filename: str
+    content_base64: Optional[str] = None
+    raw_text: Optional[str] = None
 
 
 class MasterCVCreate(BaseModel):
@@ -224,3 +238,266 @@ async def create_master_cv(
         "summary": cv.summary,
         "version": cv.version,
     }
+
+
+# ==============================================================================
+# HITO 2.1: IMPORTACIÓN DE CV Y REVISIÓN HUMANA (REQ-002, D12)
+# ==============================================================================
+
+@router.post("/sources/upload", status_code=status.HTTP_201_CREATED)
+async def upload_cv_document(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Importa un archivo de CV (PDF, DOCX, TXT) mediante multipart/form-data.
+    Extrae entidades con estado 'pending' y procedencia vinculada (Hito 2.1).
+    """
+    p_res = await session.execute(
+        select(UserProfile).where(UserProfile.tenant_id == tenant_id)
+    )
+    profile = p_res.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil no configurado. Cree el perfil primero.")
+
+    file_bytes = await file.read()
+    try:
+        result = await ProfileSourceService.import_cv_document(
+            session=session,
+            tenant_id=tenant_id,
+            profile_id=profile.id,
+            filename=file.filename or "uploaded_cv.txt",
+            file_bytes=file_bytes,
+        )
+        await session.commit()
+        return result
+    except InvalidDocumentError as ide:
+        raise HTTPException(status_code=400, detail=str(ide))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+
+@router.post("/sources/import", status_code=status.HTTP_201_CREATED)
+async def import_cv_json(
+    payload: CVImportJsonRequest,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Importa un documento de CV a través de JSON (base64 o texto plano).
+    """
+    p_res = await session.execute(
+        select(UserProfile).where(UserProfile.tenant_id == tenant_id)
+    )
+    profile = p_res.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil no configurado. Cree el perfil primero.")
+
+    if payload.content_base64:
+        try:
+            file_bytes = base64.b64decode(payload.content_base64)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Formato base64 inválido.")
+    elif payload.raw_text is not None:
+        file_bytes = payload.raw_text.encode("utf-8")
+    else:
+        raise HTTPException(status_code=400, detail="Debe proporcionar content_base64 o raw_text.")
+
+    try:
+        result = await ProfileSourceService.import_cv_document(
+            session=session,
+            tenant_id=tenant_id,
+            profile_id=profile.id,
+            filename=payload.filename,
+            file_bytes=file_bytes,
+        )
+        await session.commit()
+        return result
+    except InvalidDocumentError as ide:
+        raise HTTPException(status_code=400, detail=str(ide))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+
+@router.get("/sources")
+async def list_sources(
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Lista las fuentes profesionales importadas del usuario."""
+    p_res = await session.execute(
+        select(UserProfile).where(UserProfile.tenant_id == tenant_id)
+    )
+    profile = p_res.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil no configurado.")
+
+    sources = await ProfileSourceService.list_sources(
+        session=session,
+        tenant_id=tenant_id,
+        profile_id=profile.id,
+    )
+    return [
+        {
+            "id": s.id,
+            "source_name": s.source_name,
+            "source_type": s.source_type,
+            "file_hash": s.file_hash,
+            "verification_status": s.verification_status,
+            "extracted_data": s.extracted_data,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in sources
+    ]
+
+
+@router.get("/sources/{source_id}")
+async def get_source_detail(
+    source_id: str,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Obtiene el detalle de una fuente profesional y sus elementos extraídos."""
+    stmt = select(ProfessionalSource).where(
+        and_(ProfessionalSource.id == source_id, ProfessionalSource.tenant_id == tenant_id)
+    )
+    res = await session.execute(stmt)
+    source = res.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Fuente profesional no encontrada en el tenant.")
+
+    # Obtener skills y experiencias asociadas a la fuente
+    s_stmt = select(Skill).where(
+        and_(Skill.source_id == source.id, Skill.tenant_id == tenant_id)
+    )
+    s_res = await session.execute(s_stmt)
+    skills = list(s_res.scalars().all())
+
+    e_stmt = select(Experience).where(
+        and_(Experience.source_id == source.id, Experience.tenant_id == tenant_id)
+    )
+    e_res = await session.execute(e_stmt)
+    experiences = list(e_res.scalars().all())
+
+    return {
+        "id": source.id,
+        "source_name": source.source_name,
+        "source_type": source.source_type,
+        "file_hash": source.file_hash,
+        "verification_status": source.verification_status,
+        "extracted_data": source.extracted_data,
+        "skills": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "category": s.category,
+                "proficiency": s.proficiency,
+                "years_experience": s.years_experience,
+                "verification_status": s.verification_status,
+            }
+            for s in skills
+        ],
+        "experiences": [
+            {
+                "id": e.id,
+                "company": e.company,
+                "title": e.title,
+                "start_date": str(e.start_date),
+                "end_date": str(e.end_date) if e.end_date else None,
+                "description": e.description,
+                "verification_status": e.verification_status,
+            }
+            for e in experiences
+        ],
+    }
+
+
+@router.get("/items/pending")
+async def get_pending_review_items(
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Lista todos los elementos pendientes de revisión humana para el perfil."""
+    p_res = await session.execute(
+        select(UserProfile).where(UserProfile.tenant_id == tenant_id)
+    )
+    profile = p_res.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil no configurado.")
+
+    return await ProfileSourceService.get_pending_items(
+        session=session,
+        tenant_id=tenant_id,
+        profile_id=profile.id,
+    )
+
+
+@router.post("/items/skills/{skill_id}/review")
+async def review_skill_item(
+    skill_id: str,
+    payload: ItemReviewRequest,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Revisión humana de habilidad: aceptar, rechazar o modificar.
+    Aceptada/Modificada -> 'verified'. Rechazada -> 'rejected'.
+    """
+    try:
+        skill = await ProfileSourceService.review_skill(
+            session=session,
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+            decision=payload.decision,
+            modifications=payload.modifications,
+        )
+        await session.commit()
+        await session.refresh(skill)
+        return {
+            "id": skill.id,
+            "name": skill.name,
+            "category": skill.category,
+            "proficiency": skill.proficiency,
+            "years_experience": skill.years_experience,
+            "verification_status": skill.verification_status,
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Habilidad no encontrada en el tenant.")
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+
+@router.post("/items/experiences/{experience_id}/review")
+async def review_experience_item(
+    experience_id: str,
+    payload: ItemReviewRequest,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Revisión humana de experiencia laboral: aceptar, rechazar o modificar.
+    """
+    try:
+        exp = await ProfileSourceService.review_experience(
+            session=session,
+            tenant_id=tenant_id,
+            experience_id=experience_id,
+            decision=payload.decision,
+            modifications=payload.modifications,
+        )
+        await session.commit()
+        await session.refresh(exp)
+        return {
+            "id": exp.id,
+            "company": exp.company,
+            "title": exp.title,
+            "start_date": str(exp.start_date),
+            "end_date": str(exp.end_date) if exp.end_date else None,
+            "verification_status": exp.verification_status,
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Experiencia no encontrada en el tenant.")
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+

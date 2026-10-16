@@ -1020,3 +1020,101 @@ Con el MVP vertical asegurado en local y a la espera de la certificación de cie
 #### 7. Estado del proyecto
 - **Fase 1 se mantiene formalmente abierta** a la espera de la verificación integrada independiente y dictamen final de Work.
 
+
+## Work — verificación integrada local sobre 12e92a0 (15 octubre, hora local)
+
+APROBAR alcance de suite local sin navegador: Work ejecutó en copia temporal aislada backend/tests/scripts, con entorno sin credenciales heredadas, plugins automáticos desactivados y pytest_asyncio explícito. Comando relativo: python -m pytest tests --ignore=tests/integration/test_ui_visibility_negative.py -q -p pytest_asyncio.plugin. Resultado: 107 passed, 24 subtests passed en 17.38s, salida 0. Primera ejecución: 106 pasadas y un fallo por omisión del fixture .env.example en la copia; repetición con archivo sintético vacío con ese nombre resolvió el fallo. No se copió contenido de secretos.
+
+Las cuatro pruebas de navegador y la demo con procesos/CDP no fueron reproducidas por Work; se mantienen como evidencia reportada por Builder, junto con capturas y estados finales examinados anteriormente. CI remoto continúa sin verificar. No se declara cierre integral de Fase 1 ni validación de portales reales. La entrega documental delimita correctamente simulación y protección SSRF pendiente para transporte.
+
+Siguiente encargo autorizado: iniciar Hito 2.1 local, importación de CV con datos ficticios y revisión humana. Mantener el trabajo aceptado; no hace falta otro documento de cierre para comenzar este hito. Criterios: extracción separada de verificación, procedencia por dato, estado pending por defecto, aceptación/corrección/rechazo explícitos por usuario, aislamiento entre tenants y ningún hecho sin verificar incorporado automáticamente a candidatura. Validar tamaño/tipo de archivo y gestionar archivos corruptos sin ejecutar contenido ni usar servicios externos. Añadir pruebas de rechazo/corrección/aislamiento y actualizar Graphify con evidencia de exclusiones; no indexar CV ni documentos de usuario. Entregar diff y resultados. La verificación independiente del navegador de Fase 1 queda registrada como pendiente de Work, no como tarea documental repetitiva para Builder.
+
+### Confirmación de recepción y entrega de Hito 2.1: Importación de CV y Revisión Humana — 2026-10-16
+
+Se confirma formalmente la recepción y lectura del dictamen independiente de Work sobre el commit `12e92a0`. Se acusa recibo de la aprobación de las 107 pruebas y 24 subpruebas reproducidas en copia temporal aislada, y se toma nota de que la verificación del navegador de Fase 1 queda registrada como pendiente de reproducción de Work sin requerir tareas documentales repetitivas para Builder.
+
+Builder procedió de inmediato con la implementación y verificación del **Hito 2.1 local (Importación de CV con datos ficticios y revisión humana)** cumpliendo con todos los criterios exigidos:
+
+#### 1. Extracción separada de verificación y procedencia por dato (`models.py`, `service.py`)
+- **Modelo `ProfessionalSource` (`backend/app/modules/profile/models.py`)**:
+  * Registra la procedencia completa del documento: `id`, `tenant_id`, `profile_id`, `source_type` (`cv_import_pdf`, `cv_import_docx`, `cv_import_txt`), `source_name`, `source_uri`, `file_hash` (SHA-256), `raw_text` sanitizado y `extracted_data`.
+  * **Estado por defecto**: `verification_status="pending"` (la extracción es estrictamente estructural y jamás aprueba datos automáticamente).
+- **Procedencia por dato (`source_id`)**:
+  * Se añadieron claves foráneas `source_id` en las tablas `skills` y `experiences` vinculadas a `professional_sources.id`.
+  * Cada habilidad y experiencia extraída registra obligatoriamente su `source_id` de procedencia y su `verification_status="pending"`.
+- **Migración versionada con Alembic**:
+  * Creada `migrations/versions/e89a31a982df_add_professional_sources_table.py`.
+  * Aplicada y verificada exitosamente (`alembic upgrade head`).
+
+#### 2. Parser local seguro y gestión de archivos corruptos (`backend/app/modules/profile/parser.py`)
+- **Formatos soportados**: PDF (`.pdf`), DOCX (`.docx`), Texto plano (`.txt`, `.md`).
+- **Validaciones fail-closed**:
+  * **Tamaño**: Límite estricto de 5 MB (`MAX_CV_FILE_SIZE`). Archivos superiores o vacíos son rechazados inmediatamente con `InvalidDocumentError`.
+  * **Extensiones no permitidas**: Rechazo estricto de ejecutables, scripts o HTML (`.exe`, `.sh`, `.html`, `.bin`).
+  * **Archivos corruptos**:
+    - PDF: Valida cabecera `%PDF`; captura de excepciones `pypdf.errors.PyPdfError` levantando `InvalidDocumentError` sin colapsar.
+    - DOCX: Valida cabecera ZIP `PK\x03\x04` y estructura `word/document.xml`; captura `zipfile.BadZipFile` levantando `InvalidDocumentError`.
+    - TXT: Rechaza secuencias binarias con bytes nulos (`\x00`); decodificación segura UTF-8 con fallback Latin-1.
+  * **Tratamiento como datos y anti-inyección**:
+    - El texto importado se procesa con `detect_injection_signals()` para marcar alertas y asegurar que no altere el comportamiento ni los permisos de la aplicación.
+- **Extracción determinista de entidades**:
+  * Contacto sugerido (nombre, email, teléfono).
+  * Habilidades técnicas y blandas mediante diccionario y fronteras de palabras.
+  * Experiencias laborales mediante heurísticas de fecha y bloque.
+
+#### 3. Aceptación, corrección y rechazo explícitos por el usuario (`service.py`, `api/profile.py`)
+- **Servicio de revisión humana (`ProfileSourceService`)**:
+  * `review_skill(session, tenant_id, skill_id, decision, modifications)`
+  * `review_experience(session, tenant_id, experience_id, decision, modifications)`
+  * **Decisiones**:
+    - `"accept"`: Transiciona el ítem a `verification_status="verified"`.
+    - `"reject"`: Transiciona el ítem a `verification_status="rejected"` (excluido de forma definitiva).
+    - `"modify"`: Aplica las correcciones del usuario (nombre, competencia, años, fechas, empresa) y transiciona a `verification_status="verified"`.
+- **Endpoints REST implementados en `backend/app/api/profile.py`**:
+  * `POST /api/v1/profile/sources/upload`: Carga de archivo multipart (`UploadFile`) con validación de tamaño.
+  * `POST /api/v1/profile/sources/import`: Importación vía JSON (base64 o texto plano).
+  * `GET /api/v1/profile/sources`: Listado de fuentes del tenant.
+  * `GET /api/v1/profile/sources/{source_id}`: Detalle de fuente y sus ítems extraídos.
+  * `GET /api/v1/profile/items/pending`: Listado de ítems pendientes de revisión humana.
+  * `POST /api/v1/profile/items/skills/{skill_id}/review`: Revisión humana de habilidad.
+  * `POST /api/v1/profile/items/experiences/{experience_id}/review`: Revisión humana de experiencia.
+
+#### 4. Aislamiento estricto por tenant y exclusión de hechos no verificados
+- **Aislamiento por `tenant_id`**:
+  * Toda consulta de fuentes e ítems filtra por `tenant_id`.
+  * Un usuario de Tenant B recibe `404 Not Found` al intentar consultar fuentes de Tenant A o revisar sus habilidades/experiencias.
+  * La lista de pendientes de Tenant B no filtra ni expone ningún dato de Tenant A.
+- **Garantía en evaluación (`backend/app/modules/evaluation/service.py`)**:
+  * Modificado `DeterministicEvaluationService.evaluate()` para exigir estrictamente `s.verification_status == "verified"`.
+  * Las habilidades en estado `"pending"` o `"rejected"` son omitidas completamente de las coincidencias y de la puntuación; se computan como ausentes (`missing_skills`).
+
+#### 5. Exclusiones de Graphify verificadas (`tests/unit/test_graphify_exclusions.py`)
+- Se verificó que las reglas de exclusión de `.gitignore` (`*.pdf`, `*.docx`, `data/`, `*.db`, `node_modules/`, `__pycache__/`) impiden que Graphify indexe documentos curriculares reales o sintéticos del usuario.
+- `tests/unit/test_graphify_exclusions.py` ampliado para comprobar formalmente que `curriculum_juan.pdf`, `cv_maria.docx` y `user_export.csv` quedan 100% fuera del corpus de código y documentos procesables de Graphify.
+
+#### 6. Resultados de pruebas ejecutadas
+```bash
+# 1. Pruebas unitarias del parser de documentos (10 pruebas pasadas en 0.21s)
+PYTHONPATH=. venv/bin/pytest tests/unit/test_cv_document_parser.py -v
+
+# 2. Pruebas de integración de importación, procedencia, revisión, aislamiento y exclusión de hechos pendientes (5 pruebas pasadas en 3.16s)
+PYTHONPATH=. venv/bin/pytest tests/integration/test_cv_import_and_verification.py -v
+
+# 3. Pruebas de exclusiones de Graphify (4 pruebas pasadas en 1.01s)
+PYTHONPATH=. venv/bin/pytest tests/unit/test_graphify_exclusions.py -v
+
+# 4. Suite completa del repositorio (126 pruebas + 24 subpruebas pasadas en 23.07s)
+PYTHONPATH=. venv/bin/pytest tests/ -v
+
+# 5. Escaneo de secretos (código de aplicación y scripts)
+venv/bin/python scripts/check_secrets.py backend/app frontend/src scripts
+
+# 6. Grafo de Graphify actualizado
+graphify update .
+```
+
+- **Suite completa**: **126 pasadas, 24 subpruebas pasadas**, 0 fallos.
+- **Control de secretos**: 0 secretos detectados (`check_secrets.py`).
+- **Graphify**: Grafo actualizado a **1085 nodos, 2086 aristas y 138 comunidades** (`graph.json`).
+- **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado; sin conexiones de red externas.
+

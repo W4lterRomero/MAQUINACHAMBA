@@ -17,7 +17,10 @@ class TestGraphifyExclusions:
     @pytest.fixture
     def synthetic_sensitive_fixtures(self, tmp_path: Path):
         """Crea un árbol de directorios con fixtures sintéticos sensibles."""
-        # Archivos de entorno y secretos
+        # Reglas de .gitignore del repositorio
+        (tmp_path / ".gitignore").write_text(
+            "*.pdf\n*.docx\n!docs/**/*.md\ndata/\n*.db\n*.sqlite3\nnode_modules/\n__pycache__/\n"
+        )
         (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-synthetic12345678901234567890\n")
         (tmp_path / ".env.production").write_text("DATABASE_URL=postgres://user:pass@db/prod\n")
         (tmp_path / "deploy.key").write_text("-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3\n")
@@ -105,7 +108,16 @@ class TestGraphifyExclusions:
             for cat in ("code", "document", "paper", "image", "video")
             for f in result.get("files", {}).get(cat, [])
         ]
-        for forbidden in (".env", ".env.production", "deploy.key", "cert.pem", "id_rsa"):
+        for forbidden in (
+            ".env",
+            ".env.production",
+            "deploy.key",
+            "cert.pem",
+            "id_rsa",
+            "curriculum_juan.pdf",
+            "cv_maria.docx",
+            "user_export.csv",
+        ):
             assert forbidden not in all_corpus_files, f"{forbidden} fue incluido en el corpus de Graphify"
 
     def test_repository_exclusions_verification(self):

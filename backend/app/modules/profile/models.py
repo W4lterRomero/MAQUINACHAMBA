@@ -39,6 +39,36 @@ class UserProfile(Base):
     )  # pending, partially_verified, verified
 
 
+class ProfessionalSource(Base):
+    """
+    Fuente profesional importada (CV en PDF/DOCX/TXT, manual, etc.).
+    Principio fundamental: Extraer no equivale a verificar (verification_status obligatorio).
+    Todo dato importado inicia con verification_status='pending'.
+    """
+
+    __tablename__ = "professional_sources"
+
+    profile_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("user_profiles.id"), nullable=False, index=True
+    )
+    source_type: Mapped[str] = mapped_column(
+        String(50), default="cv_import"
+    )  # cv_import_pdf, cv_import_docx, cv_import_txt, manual
+    source_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_uri: Mapped[str] = mapped_column(Text, default="")
+    file_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, default="")
+    extracted_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    verification_status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )  # pending, partially_verified, verified, rejected
+    verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    verified_by: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class Skill(Base):
     """Habilidades técnicas y profesionales asociadas al perfil."""
 
@@ -47,13 +77,16 @@ class Skill(Base):
     profile_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("user_profiles.id"), nullable=False, index=True
     )
+    source_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("professional_sources.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     category: Mapped[str] = mapped_column(String(50), default="technical")
     proficiency: Mapped[str] = mapped_column(String(20), default="intermediate")
     years_experience: Mapped[float] = mapped_column(Float, default=1.0)
     verification_status: Mapped[str] = mapped_column(
-        String(20), default="extracted"
-    )  # extracted, verified, rejected
+        String(20), default="pending"
+    )  # pending, verified, rejected
 
 
 class Experience(Base):
@@ -63,6 +96,9 @@ class Experience(Base):
 
     profile_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("user_profiles.id"), nullable=False, index=True
+    )
+    source_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("professional_sources.id"), nullable=True, index=True
     )
     company: Mapped[str] = mapped_column(String(255), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
