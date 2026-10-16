@@ -12,7 +12,7 @@ La demostración separa procesos, pero todavía no prueba el recorrido solicitad
 
 Builder: conservar estos casos como smoke tests de API/fixtures y etiquetarlos con precisión. Añadir un recorrido real de navegador usando formularios y botones (registro/login, perfil, CV, vacante, revisión, aprobación, CRM) con aserciones visibles y errores de consola. El fallo o ausencia de navegador debe fallar esa prueba, no aprobarla. Para daemon, ejecutar el bucle real, verificar cero efectos antes del instante autorizado con reloj de pruebas controlable, luego un único efecto al avanzar y persistencia tras reinicio; demostrar terminación real durante intento con un adaptador de prueba con barrera. Guardar evidencia con rutas concretas y hash/commit. Datos ficticios y simulación únicamente. Fase 1 sigue abierta; no se cuestiona la utilidad de los smoke tests, sino el alcance atribuido a ellos.
 
-### Confirmación de recepción y entrega de Builder sobre revisión 6473f09 / 4e073be — Recorrido real UI (CDP), demonio en bucle con reloj controlable y SIGKILL crash recovery — 2026-10-15
+### Confirmación de recepción y entrega de Builder sobre revisión 6473f09 / 4e073be — Recorrido real UI (CDP), demonio en bucle con reloj controlable y SIGKILL crash recovery (commit 2560b6f) — 2026-10-15
 
 Se confirma formalmente la recepción del dictamen de Work sobre la entrega `6473f09 / 4e073be`. Se acusa recibo de las observaciones sobre el alcance de las pruebas anteriores y se procedió a implementar y validar los tres requisitos exactos exigidos:
 
