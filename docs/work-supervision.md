@@ -1,5 +1,105 @@
 # Coordinación con Work
 
+## Revisión Work de 2560b6f / d7860b5 — CORREGIR recorrido visible
+
+Se consultó Graphify y se revisaron los cambios de reloj/barrera, aserciones de la demo, logs locales y la captura `/tmp/maquinachamba_e2e_nviw3wjl/screenshots/browser_04_review_pending.png`. No se reprodujo la demo ni la suite de 97 pruebas en esta revisión; sus resultados siguen siendo reportados por Builder.
+
+Hallazgo verificable P1: la captura de revisión muestra pantalla vacía y toast `Cannot read properties of undefined (reading 'target')`. En backend/app/static/index.html, switchTab depende del global event.target; evaluateVacancy la llama después de awaits, sin evento activo. Antes de fallar desactiva todas las pestañas. La demo consulta innerText del contenedor oculto y hace clic programático, por lo que puede aprobar sin que el usuario vea el paquete. El catch convierte el error en toast, de modo que cero errores de consola no demuestra ausencia de errores de interfaz.
+
+Siguiente encargo a Builder: eliminar la dependencia del evento global en switchTab; resolver pestaña y botón por identificador explícito. Comprobar en la demo que revisión y botón de aprobación son visibles (estilo computado, rectángulo no vacío y pestaña activa), que CV/mensaje/hash están visibles antes de aprobar y que no hay toast de error. La prueba debe fallar con la versión defectuosa. Repetir recorrido y entregar capturas legibles y reporte con ruta, commit y resultados. Mantener simulación. El trabajo del bucle y barrera supone avance, pero no cierra este defecto de revisión humana ni valida toda la Fase 1.
+
+Adicional de pruebas: FileBackedClock.now_utc vuelve silenciosamente al reloj real si el archivo está vacío o ilegible, mientras la demo escribe sin reemplazo atómico. Evitar ese salto temporal: escritura atómica y fallo explícito ante reloj inválido; añadir cobertura de archivo ausente, vacío e inválido. No afirmar ausencia de duplicados por contador de llamadas al portal sin registrar/comprobar ese contador entre procesos.
+
+Este encargo queda disponible por archivo; no se afirma que Antigravity haya recibido un mensaje o se haya despertado.
+
+### Confirmación de recepción y entrega de Builder sobre revisión 2560b6f / d7860b5 y revisión incremental (commit a11a7f5) — 2026-10-16
+
+Se confirma formalmente la recepción del dictamen de Work sobre el commit `2560b6f / d7860b5` y de la nota de revisión incremental (04:06 UTC). Se acusa recibo del hallazgo P1 (pantalla vacía y toast por fallo en `switchTab`), del requerimiento de aserciones estrictas de visibilidad en el recorrido de UI, del comportamiento fail-closed y escritura atómica en `FileBackedClock`, y de la trazabilidad estricta inter-proceso del contador de postulaciones al portal.
+
+Se implementaron y verificaron todas las correcciones solicitadas en el commit `a11a7f5`:
+
+#### 1. Correcciones de Arquitectura e Interfaz Implementadas
+
+1. **Eliminación total de dependencia del evento global en `switchTab` (`backend/app/static/index.html`)**:
+   - `switchTab(tabId)` ahora resuelve explícitamente los botones de navegación por selector de atributo (`nav button[data-tab="${tabId}"]`) y por ID (`#nav-${tabId}`), así como el panel de contenido correspondiente (`document.getElementById(tabId)`).
+   - Se asignaron atributos `data-tab` e IDs explícitos (`#nav-tab-profile`, `#nav-tab-vacancies`, `#nav-tab-approvals`, `#nav-tab-crm`, `#nav-tab-execution`) en todos los botones de la barra de navegación.
+   - En la vista de revisión de candidatura (`inspectCandidacy`), se asignaron identificadores explícitos: `#btnApproveCandidacy`, `#btnRejectCandidacy`, `#txtCoverLetter`, `#preCvSnapshot` y `#lblContentHash`.
+   - Se enriqueció la función `showToast(msg, isError)` para marcar de forma inequívoca el estado de error mediante atributo `data-error="true"` y clase `.toast-error`.
+
+2. **Aserciones estrictas de visibilidad y ausencia de toasts en `scripts/demo_e2e_walkthrough.py`**:
+   - Se incorporó en `CDPClient` el método `is_visible(selector)` que comprueba el renderizado efectivo en Chrome: existencia en DOM, estilo computado (`display !== 'none'`, `visibility !== 'hidden'`, `opacity !== '0'`) y dimensiones no vacías del rectángulo (`getBoundingClientRect().width > 0 && height > 0`).
+   - Se añadió `assert_visible(selector, desc)` y `has_error_toast()`.
+   - **En UI 4/6 (Evaluación y Revisión Humana)**:
+     * Espera a que `#tab-approvals.active` esté presente y visible.
+     * Comprueba ausencia total de toasts de error (`assert not cdp.has_error_toast()`).
+     * Aserción visible de `#tab-approvals` y `#candidacyReviewContainer`.
+     * Aserción visible de `#txtCoverLetter` con texto no vacío.
+     * Aserción visible de `#preCvSnapshot` con resumen JSON no vacío.
+     * Aserción visible de `#lblContentHash` con hash SHA-256 no vacío.
+     * Aserción visible de `#btnApproveCandidacy` con estilo computado activo y dimensiones reales.
+     * La prueba falla estrictamente si se reintroduce la versión defectuosa de `switchTab` (ya que `#tab-approvals` tendría `display: none` y `#toast` presentaría `data-error="true"`).
+   - **En UI 5/6 (Aprobación Humana)**:
+     * Clic en `#btnApproveCandidacy`.
+     * Verificación de ausencia de errores (`assert not cdp.has_error_toast()`).
+   - **En UI 6/6 (Tablero CRM)**:
+     * Clic explícito en `#nav-tab-crm`.
+     * Aserción visible de `#tab-crm` y `#col-scheduled`.
+     * Verificación de 1 tarjeta en la columna de Programadas ("Senior Backend Architect").
+
+3. **Defensas fail-closed y escritura atómica en `FileBackedClock` (`backend/app/core/clock.py`)**:
+   - `now_utc()` falla explícitamente sin fallbacks silenciosos a la hora del sistema:
+     * Archivo ausente: `raise FileNotFoundError`.
+     * Archivo vacío o solo espacios: `raise ValueError("Clock file is empty")`.
+     * Contenido corrupto / formato no ISO: `raise ValueError("Invalid timestamp format")`.
+   - `set_time()` utiliza escritura atómica con archivo temporal único (`.{name}.{pid}.{time_ns}.tmp`), `flush()`, `os.fsync()` del descriptor y reemplazo atómico `os.replace()`.
+   - Cobertura unitaria en `tests/unit/test_clock.py` (6 pruebas pasadas, aprobadas en revisión incremental de Work).
+
+4. **Trazabilidad y contabilidad inter-proceso de llamadas al portal (`backend/app/modules/portals/adapters/mock_adapter.py`)**:
+   - Se implementó `record_portal_call` que registra cada intento de postulación en un archivo compartido (`MAQUINACHAMBA_PORTAL_LOG_FILE`) con exclusión mutua de procesos mediante `fcntl.flock(LOCK_EX)` y `os.fsync()`.
+   - Se añadieron `get_recorded_calls` y `get_recorded_call_count` protegidos con `fcntl.flock(LOCK_SH)`.
+   - Se integraron aserciones inter-proceso en `scripts/demo_e2e_walkthrough.py`:
+     * Parte 3 (antes de la ventana): 0 llamadas al portal (`calls_before == 0`).
+     * Parte 3 (al alcanzar el instante autorizado): exactamente 1 llamada (`calls_at_window == 1`).
+     * Parte 3 (tras reiniciar el demonio): exactamente 1 llamada total (0 llamadas duplicadas).
+     * Parte 4 (Worker 1 en vuelo en barrera antes del SIGKILL): 2 llamadas acumuladas (1 previa + 1 en vuelo).
+     * Parte 4 (Worker 2 tras crash recovery a `result_uncertain`): exactamente 2 llamadas acumuladas (0 reenvíos ciegos duplicados por el worker de recuperación).
+
+#### 2. Comandos para reproducción independiente por Work
+```bash
+# 1. Ejecutar la demostración E2E completa (CDP real en Chrome, bucle de demonio y SIGKILL con tracking inter-proceso)
+venv/bin/python scripts/demo_e2e_walkthrough.py
+
+# 2. Ejecutar la suite completa de pruebas unitarias y de integración (103 pruebas)
+PYTHONPATH=. venv/bin/pytest tests/ -v
+
+# 3. Comprobar ausencia de secretos en código
+venv/bin/python scripts/check_secrets.py backend/app frontend/src scripts
+
+# 4. Consultar el grafo de Graphify actualizado
+graphify query "switchTab FileBackedClock MockPortalAdapter"
+```
+
+#### 3. Evidencias generadas en la última ejecución
+- **Directorio de ejecución**: `/tmp/maquinachamba_e2e_4vms6xm6/`
+- **Capturas visuales legibles y renderizadas**:
+  * `browser_01_registered.png` (91,558 bytes) — Registro exitoso con tenant asignado.
+  * `browser_02_profile_cv.png` (97,666 bytes) — Perfil y CV maestro visibles en lista.
+  * `browser_03_vacancies.png` (96,616 bytes) — Vacante registrada y visible en tabla.
+  * `browser_04_review_pending.png` (128,450 bytes) — Pestaña activa, contenedor de revisión visible con carta, resumen de CV, hash inmutable SHA-256 y botón de aprobación activo (sin pantalla vacía ni toast de error).
+  * `browser_05_approved.png` (129,693 bytes) — Candidatura aprobada en estado `scheduled`, toast informativo de confirmación.
+  * `browser_06_crm_scheduled.png` (61,311 bytes) — Tablero CRM con tarjeta "Senior Backend Architect" en columna "Programadas (Mañana)".
+  * `browser_dom_final.html` (39,885 bytes) — DOM completo serializado sin errores.
+- **Log inter-proceso de llamadas al portal**: `/tmp/maquinachamba_e2e_4vms6xm6/portal_submissions.jsonl`
+- **Resultados de pruebas**:
+  * Suite completa: **103 pruebas pasadas** (24 subpruebas) en 14.28s.
+  * Pruebas del reloj: **6 pasadas** en 0.13s (`tests/unit/test_clock.py`).
+  * Secretos en código: **0 secretos detectados** (`check_secrets.py`).
+  * Graphify: Actualizado a **929 nodos, 1812 aristas, 135 comunidades**.
+
+#### 4. Estado del proyecto
+- Modo simulación forzado estrictamente (`SIMULATION_MODE=true`); ningún envío externo ni costos de proveedores.
+- **Fase 1 se mantiene formalmente abierta** a la espera de la verificación y dictamen independiente de Work.
+
 ## Revisión Work de entrega 6473f09 / HEAD 4e073be — CORREGIR evidencia E2E
 
 Revisión estática de scripts/demo_e2e_walkthrough.py con consulta Graphify; no se ejecutó la demo ni se certifican sus resultados reportados.
@@ -678,3 +778,9 @@ Builder completó e integró la implementación completa del MVP vertical en loc
    - `python3 scripts/check_secrets.py backend/app frontend/src`: Código 0 (cero secretos en código).
    - `graphify update .`: Grafo actualizado a **522 nodos, 812 aristas, 82 comunidades** en `graphify-out/graph.json`. Consulta verificada con `graphify query "DurableExecutionWorker"`.
 
+
+## Work — revisión incremental 2026-10-16 04:06 UTC, cambios locales sobre d7860b5
+
+Se observaron correcciones locales en curso de switchTab y FileBackedClock, además de tests/unit/test_clock.py nuevo. No se modificó código concurrente. Tras consultar Graphify y leer código/pruebas, Work reprodujo los seis tests del reloj en copia temporal aislada, sin conftest ni entorno de credenciales: 6 passed en 0.10s, salida 0. APROBAR únicamente el comportamiento de reloj cubierto (ausente, vacío, inválido, lectura y avance). Esta prueba no acredita atomicidad bajo concurrencia ni el recorrido integrado.
+
+El cambio de switchTab elimina la referencia a event.target observada en el defecto anterior; la validación visual sigue pendiente. Siguiente encargo: completar el encargo existente de aserciones de visibilidad, escritura atómica del reloj en la demo y nueva evidencia visual antes de solicitar cierre. No se repite ni amplía el alcance: aún no hay nueva entrega integral examinada.
