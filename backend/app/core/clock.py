@@ -82,12 +82,68 @@ class MockClock(Clock):
         self._current_utc += timedelta(days=days)
 
 
+import os
+from pathlib import Path
+
+
+class FileBackedClock(Clock):
+    """
+    Reloj de pruebas controlable y sincronizado entre múltiples procesos mediante archivo.
+    Permite avanzar o fijar el instante UTC sin tocar bases de datos ni fixtures SQL.
+    """
+
+    def __init__(self, clock_file: Path, fallback_initial: Optional[datetime] = None):
+        self.clock_file = Path(clock_file)
+        if not self.clock_file.exists():
+            init_dt = fallback_initial or datetime(2026, 10, 15, 10, 0, 0, tzinfo=timezone.utc)
+            self.set_time(init_dt)
+
+    def now_utc(self) -> datetime:
+        try:
+            if self.clock_file.exists():
+                text = self.clock_file.read_text(encoding="utf-8").strip()
+                if text:
+                    dt = datetime.fromisoformat(text)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.astimezone(timezone.utc)
+        except Exception:
+            pass
+        return datetime.now(timezone.utc)
+
+    def set_time(self, new_time: datetime) -> None:
+        if new_time.tzinfo is None:
+            dt = new_time.replace(tzinfo=timezone.utc)
+        else:
+            dt = new_time.astimezone(timezone.utc)
+        self.clock_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.clock_file.with_suffix(".tmp")
+        tmp.write_text(dt.isoformat(), encoding="utf-8")
+        tmp.replace(self.clock_file)
+
+    def advance(self, delta: timedelta) -> None:
+        curr = self.now_utc()
+        self.set_time(curr + delta)
+
+    def advance_seconds(self, seconds: float) -> None:
+        self.advance(timedelta(seconds=seconds))
+
+    def advance_hours(self, hours: float) -> None:
+        self.advance(timedelta(hours=hours))
+
+    def advance_days(self, days: int) -> None:
+        self.advance(timedelta(days=days))
+
+
 # Instancia singleton predeterminada
 _default_clock: Clock = SystemClock()
 
 
 def get_clock() -> Clock:
-    """Retorna el reloj activo."""
+    """Retorna el reloj activo. Si MAQUINACHAMBA_TEST_CLOCK_FILE está configurado, usa FileBackedClock."""
+    env_file = os.environ.get("MAQUINACHAMBA_TEST_CLOCK_FILE")
+    if env_file:
+        return FileBackedClock(Path(env_file))
     return _default_clock
 
 

@@ -4,9 +4,12 @@ Demuestra el circuito completo de postulación de forma segura y auditable
 sin realizar peticiones externas reales.
 """
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import os
+from pathlib import Path
 import uuid
 from typing import Any, Dict, Optional
 
@@ -66,6 +69,18 @@ class MockPortalAdapter:
         self.submission_count += 1
         if self.result_override is not None:
             return self.result_override
+
+        # Soporte para barrera de prueba controlada (demostración de crash durante despacho real)
+        barrier_path = os.environ.get("MAQUINACHAMBA_DISPATCH_BARRIER_FILE")
+        if barrier_path:
+            bp = Path(barrier_path)
+            bp.write_text(f"entered:{self.submission_count}", encoding="utf-8")
+            # Pausa controlada esperando terminación o liberación
+            wait_limit = 30.0
+            start_wait = asyncio.get_event_loop().time()
+            while bp.exists() and (asyncio.get_event_loop().time() - start_wait) < wait_limit:
+                await asyncio.sleep(0.05)
+
         now = datetime.now(timezone.utc)
         receipt_id = f"MOCK-CONF-{uuid.uuid4().hex[:10].upper()}"
 

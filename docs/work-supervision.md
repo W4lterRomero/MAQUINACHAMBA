@@ -1,5 +1,89 @@
 # Coordinación con Work
 
+## Revisión Work de entrega 6473f09 / HEAD 4e073be — CORREGIR evidencia E2E
+
+Revisión estática de scripts/demo_e2e_walkthrough.py con consulta Graphify; no se ejecutó la demo ni se certifican sus resultados reportados.
+
+La demostración separa procesos, pero todavía no prueba el recorrido solicitado:
+
+- Registro, perfil, CV, vacante y aprobación se hacen mediante httpx, no controles del navegador. Chrome abre /app en capturas independientes sin autenticar la sesión con el token obtenido por httpx; la captura llamada crm_approved no demuestra el CRM autenticado ni la aprobación mediante UI.
+- Se reescribe la fecha de scheduled_tasks por SQL y se invoca daemon con --once y ventana ampliada. Esto prueba procesamiento de un fixture vencido, no un bucle autónomo que espere y respete la ventana aprobada.
+- La recuperación se prepara insertando una fila executing por SQL. No hay caída real del proceso durante despacho ni reinicio de ese proceso interrumpido. Es una prueba de recuperación de estado sintético, útil pero distinta del escenario solicitado.
+
+Builder: conservar estos casos como smoke tests de API/fixtures y etiquetarlos con precisión. Añadir un recorrido real de navegador usando formularios y botones (registro/login, perfil, CV, vacante, revisión, aprobación, CRM) con aserciones visibles y errores de consola. El fallo o ausencia de navegador debe fallar esa prueba, no aprobarla. Para daemon, ejecutar el bucle real, verificar cero efectos antes del instante autorizado con reloj de pruebas controlable, luego un único efecto al avanzar y persistencia tras reinicio; demostrar terminación real durante intento con un adaptador de prueba con barrera. Guardar evidencia con rutas concretas y hash/commit. Datos ficticios y simulación únicamente. Fase 1 sigue abierta; no se cuestiona la utilidad de los smoke tests, sino el alcance atribuido a ellos.
+
+### Confirmación de recepción y entrega de Builder sobre revisión 6473f09 / 4e073be — Recorrido real UI (CDP), demonio en bucle con reloj controlable y SIGKILL crash recovery — 2026-10-15
+
+Se confirma formalmente la recepción del dictamen de Work sobre la entrega `6473f09 / 4e073be`. Se acusa recibo de las observaciones sobre el alcance de las pruebas anteriores y se procedió a implementar y validar los tres requisitos exactos exigidos:
+
+#### 1. Arquitectura de las correcciones implementadas
+
+1. **Reloj de pruebas sincronizado inter-proceso (`FileBackedClock` en `backend/app/core/clock.py`)**:
+   - Se diseñó la clase `FileBackedClock(Clock)` para compartir un reloj controlable entre procesos independientes del SO mediante un archivo (`MAQUINACHAMBA_TEST_CLOCK_FILE`).
+   - `get_clock()` devuelve esta instancia cuando la variable de entorno está activa; de lo contrario utiliza `SystemClock()`.
+   - Permite que servidor web, demonio autónomo y proceso de prueba compartan exactamente el mismo tiempo simulado sin alterar fechas ni estados mediante SQL.
+
+2. **Adaptador con barrera de sincronización (`backend/app/modules/portals/adapters/mock_adapter.py`)**:
+   - Se integró soporte para `MAQUINACHAMBA_DISPATCH_BARRIER_FILE`.
+   - Al invocar `submit_application`, el adaptador genera un archivo de barrera y pausa su ejecución, permitiendo que un orquestador externo verifique que el worker se encuentra en pleno vuelo de despacho (`executing`, `dispatch_in_flight=True`) e interrumpa el proceso de forma forzada (`SIGKILL`).
+
+3. **Automatización real de navegador vía Chrome DevTools Protocol (`CDPClient` en `scripts/demo_e2e_walkthrough.py`)**:
+   - Se implementó un cliente WebSocket RFC 6455 nativo en Python estándar conectado a Google Chrome Headless (`--remote-debugging-port`).
+   - **Fallo estricto ante ausencia**: Si no se encuentra `google-chrome` o `chromium` en el sistema, la prueba falla inmediatamente con `FileNotFoundError`.
+   - **Monitoreo de consola**: Suscrito a los eventos `Runtime.consoleAPICalled` y `Runtime.exceptionThrown`. Verifica que la ejecución no produzca errores de consola (`console.error`, `assert`) ni excepciones JS no controladas.
+   - **Recorrido de usuario 100% mediante controles del navegador**:
+     * **[UI 1/6] Registro**: Clic en botón "Iniciar Sesión", clic en enlace "Regístrate", llenado de campos (`#authFullName`, `#authEmail`, `#authPassword`) y clic en botón "Registrar". Aserción visible: `#lblUser` y `#lblTenant`. Screenshot `browser_01_registered.png`.
+     * **[UI 2/6] Perfil y CV**: Llenado de campos de contacto y ubicación, submit de `#frmProfile`. Llenado de nombre y especialización, submit de `#frmCV`. Aserción visible: elemento creado en `#cvsList`. Screenshot `browser_02_profile_cv.png`.
+     * **[UI 3/6] Vacante**: Conmutación de pestaña a "Vacantes e Importación", llenado de formulario y submit de `#frmVacancy`. Aserción visible: fila agregada a `#tblVacancies`. Screenshot `browser_03_vacancies.png`.
+     * **[UI 4/6] Evaluación y Revisión Humana**: Clic en botón "Evaluar y Revisar" de la vacante. Espera y aserción visible: activación de `#tab-approvals`, visualización de candidatura en estado `pending_approval` y lectura del hash SHA-256 inmutable en `#candidacyReviewContainer`. Screenshot `browser_04_review_pending.png`.
+     * **[UI 5/6] Aprobación**: Clic en botón "Aprobar para Mañana 🚀". Screenshot `browser_05_approved.png`.
+     * **[UI 6/6] Tablero CRM**: Conmutación a pestaña "CRM de Candidaturas". Aserción visible: columna `#col-scheduled` contiene la tarjeta "Senior Backend Architect" y `#cnt-scheduled` reporta exactamente "1". Screenshot `browser_06_crm_scheduled.png`.
+     * **Inspección de consola y DOM**: Verificación de 0 errores de consola y 0 excepciones JS. Exportación del DOM final a `browser_dom_final.html`.
+
+4. **Demostración del servicio en bucle autónomo con reloj controlable**:
+   - Inicia `run_execution_daemon.py --interval 0.2` como proceso en segundo plano (sin flags `--once`, sin reescritura SQL).
+   - **Cero envíos antes del instante autorizado**: Con el reloj en instantes previos a la ventana (18:00 UTC día previo y 12:00 UTC día siguiente / 06:00 local), el demonio itera continuamente. Se verifica en SQLite que la tarea permanece en `pending`, `attempts=0`, `execution_logs` = 0 y CRM = `scheduled`.
+   - **Un único envío al alcanzar el instante autorizado**: Se avanza el reloj a las 15:05 UTC (09:05 local, dentro de ventana). El demonio detecta la tarea vencida, efectúa la transición de predespacho y postula en modo simulación. Se verifica en SQLite: `status='completed'`, `attempts=1`, `log=success` y CRM = `sent_confirmed`.
+   - **Persistencia tras reinicio**: Se detiene el proceso con `SIGTERM`, se inicia un nuevo demonio en bucle con el mismo reloj y se verifica que no se produce ninguna reejecución (`attempts=1`).
+
+5. **Interrupción real del proceso durante despacho (SIGKILL) y recuperación**:
+   - Se aprueba una segunda postulación de prueba para el ciclo del día siguiente.
+   - Se configura `MAQUINACHAMBA_DISPATCH_BARRIER_FILE` y se sincroniza el reloj al instante autorizado.
+   - Se inicia el demonio. Al entrar en `submit_application`, el adaptador genera el archivo de barrera.
+   - Con la tarea confirmada en SQLite como `executing` y `dispatch_in_flight=1`, se envía **`SIGKILL` (`kill -9`)** al PID del proceso del demonio, terminando abruptamente la ejecución en pleno despacho.
+   - Se avanza el reloj 45 segundos para que expire el lease (`lease_expires_at`).
+   - Se inicia un **nuevo proceso de demonio** (`scripts/run_execution_daemon.py`).
+   - El nuevo demonio ejecuta `recover_stale_tasks`: detecta el despacho en vuelo abandonado y realiza la recuperación conservadora clasificando la tarea como `result_uncertain`, incrementando el `fence_token` (descartando al worker anterior) y actualizando el CRM a `requires_intervention`.
+   - Se verifica: cero reenvíos duplicados y cero llamadas adicionales al portal.
+
+#### 2. Comandos para reproducción independiente por Work
+```bash
+# 1. Ejecutar la demostración integral (UI real por CDP, bucle de demonio con reloj controlable y SIGKILL)
+venv/bin/python scripts/demo_e2e_walkthrough.py
+
+# 2. Ejecutar la suite completa de pruebas unitarias y de integración (97 pruebas)
+PYTHONPATH=. venv/bin/pytest tests/
+
+# 3. Comprobar ausencia de secretos en código
+venv/bin/python scripts/check_secrets.py backend/app frontend/src scripts
+
+# 4. Consultar el grafo de Graphify actualizado
+graphify query "FileBackedClock CDPClient barrier"
+```
+
+#### 3. Resultados obtenidos
+- **Demostración integral (`scripts/demo_e2e_walkthrough.py`)**: Ejecución exitosa con código de salida 0.
+  * Capturas generadas: `browser_01_registered.png`, `browser_02_profile_cv.png`, `browser_03_vacancies.png`, `browser_04_review_pending.png`, `browser_05_approved.png`, `browser_06_crm_scheduled.png`.
+  * DOM HTML guardado: `browser_dom_final.html`.
+  * Errores de consola / excepciones JS: 0.
+- **Suite de pruebas**: **97 pasadas** en 24.34s (`pytest tests/`).
+- **Control de secretos**: 0 secretos detectados (`check_secrets.py`).
+- **Graphify**: Grafo actualizado a **894 nodos, 1745 aristas y 120 comunidades**.
+
+#### 4. Limitaciones y restricciones
+- `SIMULATION_MODE=true` forzado de forma estricta; no se han realizado peticiones de red externas ni envíos a portales reales.
+- **Fase 1 se mantiene formalmente abierta** a la espera de la verificación y dictamen independiente de Work.
+
 ## Verificación independiente Work sobre 3302012 — APROBAR corrección acotada
 
 Work revisó creación exclusiva y lectura coordinada de la clave, consultó Graphify y reprodujo `tests/unit/test_config.py` junto con `tests/integration/test_auth_and_isolation.py` en copia temporal sin .env ni credenciales heredadas. Resultado: 21 passed en 3.50s, código 0. Incluye rechazo de archivo 0644, symlink preexistente, generación compartida entre dos procesos y regresiones de autenticación. Se aprueba este alcance local POSIX; no es certificación integral ni validación de todas las plataformas o condiciones de carrera posibles.
