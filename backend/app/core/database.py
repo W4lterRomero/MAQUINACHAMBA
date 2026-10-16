@@ -116,6 +116,7 @@ def import_all_models():
     import backend.app.modules.users.models  # noqa: F401
     import backend.app.modules.profile.models  # noqa: F401
     import backend.app.modules.cv.models  # noqa: F401
+    import backend.app.modules.communication.models  # noqa: F401
     import backend.app.modules.vacancies.models  # noqa: F401
     import backend.app.modules.evaluation.models  # noqa: F401
     import backend.app.modules.approvals.models  # noqa: F401

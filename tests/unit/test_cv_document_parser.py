@@ -411,3 +411,23 @@ def test_document_parser_process_memory_budget_exceeded(monkeypatch):
         DocumentParser.parse(b"Python basico\n", "cv_mem.txt", timeout=2.0, max_memory_bytes=30 * 1024 * 1024)
 
 
+def test_document_parser_large_payload_ipc_pipe_drain():
+    """
+    Verifica que documentos moderadamente largos (ej. ~150 KB de texto válido,
+    cuyo objeto ExtractedDocument excede el búfer estándar de 64 KB del pipe del SO)
+    se drenen activamente a través del pipe sin provocar bloqueos ni deadlocks por búfer lleno.
+    """
+    # Generar texto de ~150 KB (por debajo del límite de 1 MB de texto pero > 64 KB del búfer pipe)
+    base_line = "Desarrollador de software con experiencia en Python avanzado, FastAPI y bases de datos.\n"
+    large_text = "Carlos Ingeniero\ncarlos@test.com\n\n" + (base_line * 1800)
+    file_bytes = large_text.encode("utf-8")
+    assert len(file_bytes) > 100_000  # Mayor a 100 KB
+
+    doc = DocumentParser.parse(file_bytes, "cv_large_payload.txt", timeout=4.0)
+    assert doc.filename == "cv_large_payload.txt"
+    assert len(doc.raw_text) > 100_000
+    assert any(s.name == "Python" for s in doc.skills)
+    assert any(s.name.lower() == "fastapi" for s in doc.skills)
+
+
+

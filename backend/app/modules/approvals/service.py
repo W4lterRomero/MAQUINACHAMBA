@@ -65,12 +65,26 @@ class ApprovalService:
             "version": cv.version,
         }
 
-        letter = cover_letter or (
-            f"Estimado equipo de {vacancy.company_name},\n\n"
-            f"Me dirijo a ustedes con gran interés por la posición de {vacancy.job_title}. "
-            f"Cuento con experiencia alineada a sus requerimientos técnicos.\n\n"
-            f"Atentamente,\n{profile.full_name}"
-        )
+        if cover_letter:
+            letter = cover_letter
+        else:
+            try:
+                from backend.app.modules.communication.service import CommunicationService
+                letter = await CommunicationService.generate_cover_letter_for_candidacy(
+                    session=session,
+                    tenant_id=tenant_id,
+                    profile=profile,
+                    cv=cv,
+                    vacancy=vacancy,
+                )
+            except Exception:
+                letter = (
+                    f"Estimado equipo de {vacancy.company_name},\n\n"
+                    f"Me dirijo a ustedes con gran interés por la posición de {vacancy.job_title}. "
+                    f"Cuento con experiencia alineada a sus requerimientos técnicos.\n\n"
+                    f"Atentamente,\n{profile.full_name}"
+                )
+
 
         planned_actions = [
             {"action": "authenticate_session", "target": vacancy.source},

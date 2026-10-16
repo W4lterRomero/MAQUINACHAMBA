@@ -167,6 +167,7 @@
     <button data-tab="tab-profile" id="nav-tab-profile" class="active" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
     <button data-tab="tab-cv-import" id="nav-tab-cv-import" onclick="switchTab('tab-cv-import')">Importar y Revisar CV</button>
     <button data-tab="tab-master-cvs" id="nav-tab-master-cvs" onclick="switchTab('tab-master-cvs')">CVs Maestros</button>
+    <button data-tab="tab-communication" id="nav-tab-communication" onclick="switchTab('tab-communication')">Estilo y Comunicación</button>
     <button data-tab="tab-vacancies" id="nav-tab-vacancies" onclick="switchTab('tab-vacancies')">Vacantes e Importación</button>
     <button data-tab="tab-approvals" id="nav-tab-approvals" onclick="switchTab('tab-approvals')">Revisión y Aprobaciones</button>
     <button data-tab="tab-crm" id="nav-tab-crm" onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
@@ -409,6 +410,151 @@
           </p>
           <div id="masterCVsCardsContainer" style="display: flex; flex-direction: column; gap: 1rem;">
             <div style="text-align: center; color: var(--text-muted); padding: 2rem;">No hay CVs maestros registrados.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: ESTILO Y COMUNICACIÓN (REQ-006, D10) -->
+    <section id="tab-communication" class="tab-content">
+      <div class="grid">
+        <!-- Columna Izquierda: Cuestionario de Estilo, Reglas y Ejemplos -->
+        <div class="card" style="flex: 1.2;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+            <h2>Cuestionario de Estilo y Reglas</h2>
+            <span id="lblCommStatusBadge" class="badge badge-confirmed">Aprobado</span>
+          </div>
+
+          <form id="frmCommProfile" onsubmit="saveCommunicationProfile(event)">
+            <!-- 1. Tono de postulación -->
+            <div class="form-group">
+              <label>Tono Predeterminado de Postulación</label>
+              <select id="commTone" onchange="generateCommPreview()">
+                <option value="formal">Formal — Tradicional, respetuoso y sobrio</option>
+                <option value="semiformal">Semiformal — Profesional, cercano y contemporáneo</option>
+                <option value="casual">Casual — Directo, ágil y entusiasta</option>
+              </select>
+              <span style="font-size: 0.78rem; color: var(--text-muted);">
+                Define el tratamiento, cortesía y estructura lingüística del mensaje.
+              </span>
+            </div>
+
+            <!-- 2. Nivel de concisión -->
+            <div class="form-group">
+              <label>Nivel de Concisión y Extensión</label>
+              <select id="commConciseness" onchange="generateCommPreview()">
+                <option value="concise">Conciso (2 párrafos compactos)</option>
+                <option value="standard" selected>Estándar (3 párrafos estructurados)</option>
+                <option value="detailed">Detallado (4 párrafos desarrollados)</option>
+              </select>
+            </div>
+
+            <!-- 3. Foco de Valor Profesional -->
+            <div class="form-group">
+              <label>Foco de Valor (Cuestionario)</label>
+              <select id="commFocusArea" onchange="generateCommPreview()">
+                <option value="technical_depth">Profundidad técnica y diseño de software limpio</option>
+                <option value="problem_solving">Resolución analítica y entrega sistemática de valor</option>
+                <option value="leadership_and_collaboration">Colaboración interdisciplinaria y trabajo en equipo</option>
+                <option value="general_match">Alineamiento directo con las expectativas del rol</option>
+              </select>
+            </div>
+
+            <!-- 4. Estilo de Saludo -->
+            <div class="form-group">
+              <label>Estilo de Saludo Inicial</label>
+              <select id="commGreetingStyle" onchange="generateCommPreview()">
+                <option value="default">Por defecto según tono (Equipo de Selección)</option>
+                <option value="recipient_direct">Directo al Responsable de Selección</option>
+                <option value="team_direct">Directo al Equipo de la Empresa</option>
+              </select>
+            </div>
+
+            <!-- 5. Casillas de verificación -->
+            <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; background: #0f172a; padding: 0.75rem; border-radius: 0.375rem; border: 1px solid var(--card-border);">
+              <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.85rem;">
+                <input type="checkbox" id="commMentionAvailability" checked onchange="generateCommPreview()">
+                Mencionar disponibilidad declarada en el perfil
+              </label>
+              <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.85rem;">
+                <input type="checkbox" id="commIncludePortfolio" checked onchange="generateCommPreview()">
+                Incluir enlace al portafolio / GitHub si existe en perfil
+              </label>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btnSaveCommProfile" style="width: 100%;">
+              Guardar Perfil de Comunicación
+            </button>
+          </form>
+
+          <!-- Sección de Ejemplos de Redacción del Usuario -->
+          <div style="margin-top: 1.5rem; border-top: 1px solid var(--card-border); padding-top: 1rem;">
+            <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Ejemplos de Comunicación Aportados</h3>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+              Añade ejemplos o cartas pasadas. Son sanitizados estrictamente y protegidos contra prompt injection.
+            </p>
+            <form id="frmAddExample" onsubmit="addCommExample(event)" style="margin-bottom: 1rem;">
+              <div class="form-group" style="margin-bottom: 0.5rem;">
+                <input type="text" id="commExTitle" placeholder="Título (ej. Postulación para Startup Backend)" required>
+              </div>
+              <div class="form-group" style="margin-bottom: 0.5rem;">
+                <textarea id="commExContent" placeholder="Texto o fragmento del ejemplo de redacción..." style="height: 70px;" required></textarea>
+              </div>
+              <button type="submit" class="btn btn-outline btn-sm" id="btnAddCommExample">+ Añadir Ejemplo</button>
+            </form>
+            <div id="commExamplesList" style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 180px; overflow-y: auto;">
+              <span style="color: var(--text-muted); font-size: 0.8rem;">Sin ejemplos guardados.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Columna Derecha: Vista Previa Determinista en Tiempo Real -->
+        <div class="card" style="flex: 1.8;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+            <h2>Vista Previa del Mensaje de Candidatura</h2>
+            <button class="btn btn-outline btn-sm" id="btnRefreshCommPreview" onclick="generateCommPreview()">Actualizar Vista</button>
+          </div>
+
+          <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 200px;">
+              <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">Vacante de Prueba</label>
+              <select id="commPreviewVacancySelect" onchange="generateCommPreview()" style="width: 100%;">
+                <option value="">Vacante de muestra (Senior Backend Engineer - Tech Corp)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">Alternar Tono</label>
+              <div style="display: flex; gap: 0.35rem;">
+                <button type="button" class="btn btn-outline btn-sm" id="btnPreviewToneFormal" onclick="setPreviewToneOverride('formal')">Formal</button>
+                <button type="button" class="btn btn-outline btn-sm" id="btnPreviewToneSemiformal" onclick="setPreviewToneOverride('semiformal')">Semiformal</button>
+                <button type="button" class="btn btn-outline btn-sm" id="btnPreviewToneCasual" onclick="setPreviewToneOverride('casual')">Casual</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="commPreviewCard" class="card" style="background: #0b1120; border-color: #3b82f6;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.4rem;">
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span class="badge badge-confirmed" id="commPreviewToneBadge">Tono: Formal</span>
+                <span class="badge badge-pending" id="commPreviewSkillsBadge">0 habilidades verificadas</span>
+              </div>
+              <span style="font-size: 0.75rem; color: var(--text-muted);" id="commPreviewRulesCount">3 reglas aplicadas</span>
+            </div>
+
+            <!-- Contenedor del Mensaje -->
+            <div id="commPreviewText" style="white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; line-height: 1.6; color: var(--text-main); min-height: 180px; padding: 0.75rem; background: #070d19; border-radius: 0.375rem; border: 1px solid var(--card-border);">
+              Cargando vista previa determinista...
+            </div>
+
+            <!-- Metadata de Hechos Verificados y Reglas -->
+            <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--card-border); font-size: 0.8rem;">
+              <strong style="color: var(--primary);">Garantía de Veracidad (Regla 4 y 5):</strong>
+              <div id="commPreviewFactsNote" style="color: var(--text-muted); margin-top: 0.25rem;">
+                Generado deterministamente sin invocar IA externa. Cita únicamente hechos con estado verificado.
+              </div>
+              <div id="commPreviewFactsList" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.5rem;">
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -763,6 +909,7 @@
       if (tabId === "tab-execution") loadTasks();
       if (tabId === "tab-cv-import") loadCVImportData();
       if (tabId === "tab-master-cvs") { loadMasterCVsList(); loadVerifiedSkillsForForm(); }
+      if (tabId === "tab-communication") loadCommunicationData();
       if (tabId === "tab-profile") loadProfileData();
     }
 
@@ -1702,10 +1849,246 @@
       } catch (e) {}
     }
 
+    // === ESTILO Y COMUNICACIÓN (REQ-006, D10) ===
+    let cachedCommProfile = null;
+    let overridePreviewTone = null;
+
+    async function loadCommunicationData() {
+      if (!authToken) return;
+      try {
+        const profile = await apiRequest("/api/v1/communication");
+        if (!profile) return;
+        cachedCommProfile = profile;
+
+        if (profile.tone) document.getElementById("commTone").value = profile.tone;
+        if (profile.writing_rules?.conciseness) {
+          document.getElementById("commConciseness").value = profile.writing_rules.conciseness;
+        }
+        if (profile.questionnaire_answers?.focus_area) {
+          document.getElementById("commFocusArea").value = profile.questionnaire_answers.focus_area;
+        }
+        if (profile.questionnaire_answers?.greeting_style) {
+          document.getElementById("commGreetingStyle").value = profile.questionnaire_answers.greeting_style;
+        }
+        document.getElementById("commMentionAvailability").checked =
+          profile.questionnaire_answers?.mention_availability !== false;
+        document.getElementById("commIncludePortfolio").checked =
+          profile.writing_rules?.include_portfolio !== false;
+
+        document.getElementById("lblCommStatusBadge").innerText =
+          profile.status === "approved" ? "Aprobado" : "Borrador";
+
+        renderCommExamplesList(profile.example_texts || []);
+        await loadVacanciesForCommPreview();
+        await generateCommPreview();
+      } catch (e) {
+        console.error("Error al cargar datos de comunicación:", e);
+      }
+    }
+
+    function renderCommExamplesList(examples) {
+      const container = document.getElementById("commExamplesList");
+      if (!examples || examples.length === 0) {
+        container.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8rem;">Sin ejemplos guardados.</span>';
+        return;
+      }
+      container.innerHTML = examples.map(ex => `
+        <div style="background: #1e293b; border: 1px solid var(--card-border); border-radius: 0.375rem; padding: 0.6rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;">
+          <div style="flex: 1;">
+            <strong style="font-size: 0.85rem; color: #e2e8f0; display: block;">${escapeHtml(ex.title)}</strong>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0.2rem 0 0 0; line-height: 1.3;">
+              ${escapeHtml(ex.content.substring(0, 120))}${ex.content.length > 120 ? '...' : ''}
+            </p>
+          </div>
+          <button class="btn btn-danger btn-sm" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;" onclick="removeCommExample('${ex.id}')">✕</button>
+        </div>
+      `).join("");
+    }
+
+    async function loadVacanciesForCommPreview() {
+      const sel = document.getElementById("commPreviewVacancySelect");
+      if (!sel) return;
+      const currentVal = sel.value;
+      try {
+        const vacancies = await apiRequest("/api/v1/vacancies");
+        let options = '<option value="">Vacante de muestra (Senior Backend Engineer - Tech Corp)</option>';
+        if (vacancies && vacancies.length > 0) {
+          options += vacancies.map(v => `<option value="${v.id}">${escapeHtml(v.job_title)} — ${escapeHtml(v.company_name)}</option>`).join("");
+        }
+        sel.innerHTML = options;
+        if (currentVal) sel.value = currentVal;
+      } catch (e) {}
+    }
+
+    async function saveCommunicationProfile(e) {
+      if (e) e.preventDefault();
+      if (!authToken) return;
+
+      const tone = document.getElementById("commTone").value;
+      const conciseness = document.getElementById("commConciseness").value;
+      const focus_area = document.getElementById("commFocusArea").value;
+      const greeting_style = document.getElementById("commGreetingStyle").value;
+      const mention_availability = document.getElementById("commMentionAvailability").checked;
+      const include_portfolio = document.getElementById("commIncludePortfolio").checked;
+
+      const payload = {
+        tone,
+        writing_rules: {
+          conciseness,
+          include_portfolio,
+        },
+        questionnaire_answers: {
+          focus_area,
+          greeting_style,
+          mention_availability,
+        },
+        status: "approved",
+      };
+
+      try {
+        const updated = await apiRequest("/api/v1/communication", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        cachedCommProfile = updated;
+        showToast("Perfil de comunicación guardado con éxito.");
+        overridePreviewTone = null;
+        await generateCommPreview();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    async function addCommExample(e) {
+      if (e) e.preventDefault();
+      if (!authToken) return;
+
+      const titleInput = document.getElementById("commExTitle");
+      const contentInput = document.getElementById("commExContent");
+      const title = titleInput.value.trim();
+      const content = contentInput.value.trim();
+
+      if (!title || !content) {
+        showToast("Por favor complete título y contenido del ejemplo.", true);
+        return;
+      }
+
+      const existingExamples = (cachedCommProfile?.example_texts || []).slice();
+      existingExamples.push({
+        id: "ex-" + Date.now().toString(36),
+        title,
+        content,
+      });
+
+      try {
+        const updated = await apiRequest("/api/v1/communication", {
+          method: "POST",
+          body: JSON.stringify({ example_texts: existingExamples }),
+        });
+        cachedCommProfile = updated;
+        renderCommExamplesList(updated.example_texts || []);
+        titleInput.value = "";
+        contentInput.value = "";
+        showToast("Ejemplo añadido correctamente.");
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    async function removeCommExample(exampleId) {
+      if (!authToken || !cachedCommProfile) return;
+      const existingExamples = (cachedCommProfile.example_texts || []).filter(ex => ex.id !== exampleId);
+      try {
+        const updated = await apiRequest("/api/v1/communication", {
+          method: "POST",
+          body: JSON.stringify({ example_texts: existingExamples }),
+        });
+        cachedCommProfile = updated;
+        renderCommExamplesList(updated.example_texts || []);
+        showToast("Ejemplo eliminado.");
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    function setPreviewToneOverride(tone) {
+      overridePreviewTone = tone;
+      generateCommPreview();
+    }
+
+    async function generateCommPreview() {
+      if (!authToken) return;
+
+      const vacSelect = document.getElementById("commPreviewVacancySelect");
+      const vacancy_id = vacSelect ? vacSelect.value || null : null;
+      const tone = overridePreviewTone || document.getElementById("commTone").value;
+      const conciseness = document.getElementById("commConciseness").value;
+      const focus_area = document.getElementById("commFocusArea").value;
+
+      ["formal", "semiformal", "casual"].forEach(t => {
+        const btn = document.getElementById(`btnPreviewTone${t.charAt(0).toUpperCase() + t.slice(1)}`);
+        if (btn) {
+          if (t === tone) {
+            btn.classList.add("btn-primary");
+            btn.classList.remove("btn-outline");
+          } else {
+            btn.classList.remove("btn-primary");
+            btn.classList.add("btn-outline");
+          }
+        }
+      });
+
+      try {
+        const previewData = await apiRequest("/api/v1/communication/preview", {
+          method: "POST",
+          body: JSON.stringify({
+            vacancy_id,
+            override_tone: tone,
+            override_conciseness: conciseness,
+            override_focus_area: focus_area,
+          }),
+        });
+
+        if (!previewData) return;
+
+        document.getElementById("commPreviewText").innerText = previewData.preview_text;
+        document.getElementById("commPreviewToneBadge").innerText = `Tono: ${previewData.tone.toUpperCase()}`;
+        document.getElementById("commPreviewSkillsBadge").innerText =
+          `${previewData.verified_skills_count || 0} habilidades verificadas`;
+        document.getElementById("commPreviewRulesCount").innerText =
+          `${(previewData.rules_applied || []).length} reglas aplicadas`;
+
+        const factsList = document.getElementById("commPreviewFactsList");
+        const facts = previewData.facts_used || {};
+        const factChips = [];
+
+        if (facts.candidate_name) factChips.push(`Candidato: ${escapeHtml(facts.candidate_name)}`);
+        if (facts.company_name) factChips.push(`Empresa: ${escapeHtml(facts.company_name)}`);
+        if (facts.vacancy_title) factChips.push(`Vacante: ${escapeHtml(facts.vacancy_title)}`);
+        if (facts.verified_skills && facts.verified_skills.length > 0) {
+          factChips.push(`Skills: ${escapeHtml(facts.verified_skills.join(", "))}`);
+        }
+        if (facts.verified_experience) {
+          factChips.push(`Experiencia: ${escapeHtml(facts.verified_experience)}`);
+        }
+
+        factsList.innerHTML = factChips.map(c => `
+          <span style="background: #1e293b; border: 1px solid #334155; padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.72rem; color: #94a3b8;">
+            ✓ ${c}
+          </span>
+        `).join("");
+
+      } catch (err) {
+        document.getElementById("commPreviewText").innerText =
+          "No se pudo generar la vista previa: " + err.message;
+      }
+    }
+
     async function loadInitialData() {
       await loadProfileData();
       await loadCVImportData();
       await loadMasterCVsList();
+      await loadCommunicationData();
       await loadVacancies();
       await loadCRM();
       await loadTasks();

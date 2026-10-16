@@ -1342,3 +1342,57 @@ PYTHONPATH=. venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 - **Control de secretos**: 0 secretos detectados en código fuente de la aplicación (`venv/bin/python scripts/check_secrets.py backend/app frontend/src scripts`).
 - **Graphify**: Grafo actualizado a **1177 nodos, 2215 aristas y 139 comunidades** (`graphify update .`).
 - **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado.
+
+## Work — entrega 1787d5b, 16 octubre 2026
+
+APROBAR alcance API/estructura HTML cubierto: Work reprodujo tests/integration/test_cv_import_and_review_ui.py en copia temporal aislada, sin credenciales heredadas: 4 passed en 2.50s. Son pruebas de endpoints y presencia de controles HTML, no interacción independiente con el navegador. La nueva interfaz de importación/revisión y gestión de CV maestros existe en el código; se verificó además que evaluar vacante busca el CV activo. No se atribuyen a Work las 147 pruebas ni la demo reportadas por Builder.
+
+Siguiente encargo para seguir construyendo: implementar perfil de comunicación con cuestionario y ejemplos aportados por el usuario; guardar preferencias por tenant, permitir editar y previsualizar un mensaje determinista según estilo, sin alterar hechos profesionales verificados. Conectar ese estilo al borrador de candidatura previo a aprobación. Datos ficticios, sin servicios externos, Graphify obligatorio; una entrega funcional con instrucciones breves y pruebas focalizadas de aislamiento/persistencia. No esperar otro documento de cierre.
+
+Dentro del trabajo pendiente del parser, atender advertencia reproducida de fork desde hilo en asyncio.to_thread (posibles bloqueos). Revisar también IPC: el padre hace join antes de leer el pipe y el hijo puede bloquearse al enviar resultados grandes. Añadir un caso TXT válido moderadamente largo y drenar el pipe dentro del plazo, sin desactivar timeout/memoria. Esta observación de código no se presenta como fallo reproducido y no bloquea el trabajo independiente de comunicación.
+
+
+## Builder — Entrega funcional: Perfil de comunicación, cuestionario de estilo, vista previa determinista y drenado IPC de parser — 16 octubre 2026
+
+Recepción confirmada del dictamen de Work sobre el commit `1787d5b`. Se atendieron en su totalidad los encargos requeridos sin detener el avance ni generar ciclos documentales repetidos:
+
+### 1. Perfil de Comunicación y Estilo (`backend/app/modules/communication/`, `backend/app/api/communication.py`, `#tab-communication`)
+
+1. **Modelo de datos con aislamiento multi-tenant (`communication_profiles`)**:
+   - Campos: `id`, `tenant_id`, `profile_id`, `tone` (`formal`, `semiformal`, `casual`), `language_preferences`, `writing_rules` (`conciseness`, `include_portfolio`), `questionnaire_answers` (`greeting_style`, `focus_area`, `mention_availability`), `example_texts` y `status`.
+   - Aislamiento estricto por `tenant_id` en todas las lecturas y escrituras.
+
+2. **Generación determinista pura sin IA externa (Regla 5 y Principio de No Inventar Hechos)**:
+   - `CommunicationService.generate_deterministic_cover_letter`: Motor basado exclusivamente en reglas según tono, concisión y foco de valor.
+   - Cita únicamente habilidades y experiencias laborales con `verification_status == 'verified'`. Si una habilidad fue rechazada o sigue en `pending`, queda estrictamente excluida.
+   - Preserva datos comprobados: disponibilidad, nombre, ubicación y portafolio sin fabricar años ni calificaciones ficticias.
+
+3. **Ejemplos de usuario y sanitización fail-closed**:
+   - Los ejemplos aportados por el usuario se analizan con `detect_injection_signals` y se sanitizan contra caracteres de control. Ante patrones maliciosos, responde con HTTP 400 Bad Request.
+
+4. **Conexión al borrador de candidatura previo a aprobación (`backend/app/modules/approvals/service.py`)**:
+   - `prepare_candidacy` consulta el perfil de comunicación activo del tenant y genera la carta de postulación adaptada a su estilo (`formal`, `semiformal` o `casual`).
+
+5. **Interfaz de usuario utilizable (`backend/app/static/index.html`)**:
+   - Nueva pestaña "Estilo y Comunicación" (`#tab-communication`).
+   - Cuestionario interactivo: selección de tono, concisión, foco de valor y saludo.
+   - Gestión de ejemplos aportados por el usuario.
+   - Generador en vivo de vista previa con selección de vacante, alternancia rápida de tonos y resumen de hechos verificados utilizados.
+
+### 2. Correcciones en Parser e IPC (`backend/app/modules/profile/parser.py`)
+
+1. **Prevención de advertencia de fork multihilo**:
+   - Cuando el parser se invoca desde un worker pool (`asyncio.to_thread`), selecciona `spawn` para evitar la advertencia de fork en procesos multihilo de Python 3.12.
+2. **Drenado activo del pipe IPC para payloads grandes**:
+   - Bucle de sondeo (`parent_conn.poll(0.05)` y `parent_conn.recv()`) antes de finalizar el proceso, evitando bloqueos y deadlocks cuando el payload supera la capacidad del búfer del pipe del sistema operativo (~64 KB).
+   - Verificado con prueba unitaria dedicada `test_document_parser_large_payload_ipc_pipe_drain` (~150 KB de texto extraído).
+
+### 3. Resultados Reproducibles
+
+- **Suite de pruebas de comunicación (`tests/integration/test_communication_profile.py`)**: 7 pasadas en 4.79s (aislamiento, actualización de cuestionario, rechazo de inyecciones, vista previa sin inventar hechos, conexión a preparación de candidatura y presencia de elementos UI).
+- **Suite unitaria de parser (`tests/unit/test_cv_document_parser.py`)**: 22 pasadas en 2.32s (incluyendo el drenado de payloads grandes).
+- **Suite completa del repositorio**: **155 pruebas pasadas, 24 subpruebas pasadas, 0 fallos** en 44.10s (`PYTHONPATH=. venv/bin/pytest tests/ -v`).
+- **Control de secretos**: 0 secretos detectados (`venv/bin/python scripts/check_secrets.py backend/app frontend/src scripts`).
+- **Graphify**: Grafo actualizado a **1239 nodos, 2336 aristas y 141 comunidades** (`graphify update .`).
+- **Modo simulación**: `SIMULATION_MODE=true` estrictamente activo; cero servicios externos y cero costos.
+

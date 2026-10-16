@@ -16,8 +16,11 @@ from dataclasses import dataclass, field
 import hashlib
 import io
 import multiprocessing as mp
+import os
 import re
 import resource
+import threading
+import time
 from typing import Any, Dict, List, Optional
 import zipfile
 
@@ -293,8 +296,18 @@ class DocumentParser:
         if timeout <= 0:
             return cls._parse_internal(file_bytes=file_bytes, filename=filename)
 
-        # Multiproceso aislado con Pipes
-        ctx = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else None)
+        # Selección de contexto de multiproceso:
+        # En hilos secundarios (como asyncio.to_thread), preferir 'spawn' para evitar fork() multihilo.
+        # En hilo principal o pruebas unitarias con monkeypatch, usar 'fork' si está disponible.
+        configured_method = os.environ.get("MAQUINACHAMBA_PARSER_START_METHOD")
+        if configured_method and configured_method in mp.get_all_start_methods():
+            chosen_method = configured_method
+        elif threading.current_thread() is not threading.main_thread() and "spawn" in mp.get_all_start_methods():
+            chosen_method = "spawn"
+        else:
+            chosen_method = "fork" if "fork" in mp.get_all_start_methods() else None
+
+        ctx = mp.get_context(chosen_method)
         parent_conn, child_conn = ctx.Pipe()
 
         proc = ctx.Process(
@@ -303,17 +316,43 @@ class DocumentParser:
         )
         proc.start()
 
-        # Esperar hasta agotar timeout
-        proc.join(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        result = None
+        has_result = False
+
+        # Drenar activamente el pipe IPC mientras el proceso trabaja para evitar bloqueos
+        # cuando el payload excede la capacidad del búfer del pipe del SO (~64 KB).
+        while time.monotonic() < deadline:
+            remaining = max(0.01, deadline - time.monotonic())
+            if parent_conn.poll(min(0.05, remaining)):
+                try:
+                    result = parent_conn.recv()
+                    has_result = True
+                    break
+                except (EOFError, OSError):
+                    break
+            if not proc.is_alive():
+                # El proceso terminó; verificar si hay datos pendientes en el búfer
+                if parent_conn.poll():
+                    try:
+                        result = parent_conn.recv()
+                        has_result = True
+                    except (EOFError, OSError):
+                        pass
+                break
+
+        # Esperar finalización del proceso con el tiempo restante
+        remaining_timeout = max(0.0, deadline - time.monotonic())
+        proc.join(timeout=min(0.5, remaining_timeout))
 
         if proc.is_alive():
             # Terminar y matar proceso que excede el tiempo límite
             try:
                 proc.terminate()
-                proc.join(timeout=0.5)
+                proc.join(timeout=0.3)
                 if proc.is_alive():
                     proc.kill()
-                    proc.join(timeout=0.5)
+                    proc.join(timeout=0.3)
             except Exception:
                 pass
             finally:
@@ -329,15 +368,8 @@ class DocumentParser:
         exitcode = proc.exitcode
         proc.close()
 
-        if exitcode != 0 and not parent_conn.poll():
-            parent_conn.close()
-            raise InvalidDocumentError(
-                f"El proceso de extracción del documento finalizó anormalmente (código {exitcode}). "
-                "Posible agotamiento de memoria o archivo malicioso."
-            )
-
-        if parent_conn.poll():
-            status, payload = parent_conn.recv()
+        if has_result:
+            status, payload = result
             parent_conn.close()
             if status == "ok":
                 return payload
@@ -345,9 +377,16 @@ class DocumentParser:
                 raise InvalidDocumentError(payload)
             else:
                 raise InvalidDocumentError(payload)
-        else:
+
+        if exitcode != 0:
             parent_conn.close()
-            raise InvalidDocumentError("El proceso de extracción no retornó ningún resultado.")
+            raise InvalidDocumentError(
+                f"El proceso de extracción del documento finalizó anormalmente (código {exitcode}). "
+                "Posible agotamiento de memoria o archivo malicioso."
+            )
+
+        parent_conn.close()
+        raise InvalidDocumentError("El proceso de extracción no retornó ningún resultado.")
 
     @classmethod
     def _parse_internal(cls, file_bytes: bytes, filename: str) -> ExtractedDocument:
