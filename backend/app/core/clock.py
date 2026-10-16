@@ -84,32 +84,40 @@ class MockClock(Clock):
 
 import os
 from pathlib import Path
+import time as time_module
 
 
 class FileBackedClock(Clock):
     """
     Reloj de pruebas controlable y sincronizado entre múltiples procesos mediante archivo.
     Permite avanzar o fijar el instante UTC sin tocar bases de datos ni fixtures SQL.
+    Falla de manera explícita si el archivo no existe, está vacío o es inválido (fail-closed).
     """
 
     def __init__(self, clock_file: Path, fallback_initial: Optional[datetime] = None):
         self.clock_file = Path(clock_file)
-        if not self.clock_file.exists():
-            init_dt = fallback_initial or datetime(2026, 10, 15, 10, 0, 0, tzinfo=timezone.utc)
-            self.set_time(init_dt)
+        if fallback_initial is not None and not self.clock_file.exists():
+            self.set_time(fallback_initial)
 
     def now_utc(self) -> datetime:
+        if not self.clock_file.exists():
+            raise FileNotFoundError(f"Clock file does not exist: {self.clock_file}")
         try:
-            if self.clock_file.exists():
-                text = self.clock_file.read_text(encoding="utf-8").strip()
-                if text:
-                    dt = datetime.fromisoformat(text)
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    return dt.astimezone(timezone.utc)
-        except Exception:
-            pass
-        return datetime.now(timezone.utc)
+            text = self.clock_file.read_text(encoding="utf-8").strip()
+        except OSError as e:
+            raise ValueError(f"Failed to read clock file {self.clock_file}: {e}") from e
+
+        if not text:
+            raise ValueError(f"Clock file is empty: {self.clock_file}")
+
+        try:
+            dt = datetime.fromisoformat(text)
+        except Exception as e:
+            raise ValueError(f"Invalid timestamp format in clock file {self.clock_file}: '{text}'") from e
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     def set_time(self, new_time: datetime) -> None:
         if new_time.tzinfo is None:
@@ -117,9 +125,13 @@ class FileBackedClock(Clock):
         else:
             dt = new_time.astimezone(timezone.utc)
         self.clock_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.clock_file.with_suffix(".tmp")
-        tmp.write_text(dt.isoformat(), encoding="utf-8")
-        tmp.replace(self.clock_file)
+        # Escritura atómica con archivo temporal único, flush, fsync y reemplazo atómico
+        tmp = self.clock_file.with_name(f".{self.clock_file.name}.{os.getpid()}.{time_module.time_ns()}.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(dt.isoformat())
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.clock_file)
 
     def advance(self, delta: timedelta) -> None:
         curr = self.now_utc()

@@ -7,11 +7,13 @@ sin realizar peticiones externas reales.
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import fcntl
 import hashlib
+import json
 import os
 from pathlib import Path
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.app.core.config import get_settings
 
@@ -52,6 +54,65 @@ class MockPortalAdapter:
         self.submission_count: int = 0
         self.result_override = result_override
 
+    @classmethod
+    def record_portal_call(
+        cls,
+        tenant_id: str,
+        target_url: str,
+        idempotency_key: Optional[str] = None,
+        event: str = "submit_application",
+    ) -> None:
+        """Registra la llamada en un archivo compartido inter-proceso protegido por file lock."""
+        log_path_str = os.environ.get("MAQUINACHAMBA_PORTAL_LOG_FILE")
+        if not log_path_str:
+            return
+        log_path = Path(log_path_str)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "pid": os.getpid(),
+            "tenant_id": tenant_id,
+            "target_url": target_url,
+            "idempotency_key": idempotency_key,
+            "event": event,
+        }
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    f.write(json.dumps(record) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+
+    @classmethod
+    def get_recorded_calls(cls, log_path: Path) -> List[Dict[str, Any]]:
+        """Lee el registro inter-proceso de llamadas con file lock compartido."""
+        if not log_path.exists():
+            return []
+        calls = []
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                try:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            calls.append(json.loads(line))
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        return calls
+
+    @classmethod
+    def get_recorded_call_count(cls, log_path: Path) -> int:
+        """Retorna el conteo real inter-proceso de llamadas al portal."""
+        return len(cls.get_recorded_calls(log_path))
+
     async def submit_application(
         self,
         tenant_id: str,
@@ -67,6 +128,12 @@ class MockPortalAdapter:
         Genera recibo sintético y evidencia inmutable.
         """
         self.submission_count += 1
+        self.record_portal_call(
+            tenant_id=tenant_id,
+            target_url=target_url,
+            idempotency_key=idempotency_key,
+            event="submit_attempt",
+        )
         if self.result_override is not None:
             return self.result_override
 

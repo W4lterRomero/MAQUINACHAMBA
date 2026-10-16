@@ -53,6 +53,11 @@ import urllib.request
 import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from backend.app.core.clock import FileBackedClock
+from backend.app.modules.portals.adapters.mock_adapter import MockPortalAdapter
 
 
 def find_free_port() -> int:
@@ -225,6 +230,42 @@ class CDPClient:
         img_bytes = base64.b64decode(res["result"]["data"])
         output_path.write_bytes(img_bytes)
 
+    def is_visible(self, selector: str) -> bool:
+        """
+        Verifica visibilidad real en el renderizado de Chrome:
+        - El elemento existe en el DOM
+        - getComputedStyle(el).display !== 'none'
+        - getComputedStyle(el).visibility !== 'hidden'
+        - opacity !== '0'
+        - getBoundingClientRect() tiene width > 0 y height > 0
+        """
+        js = f"""(() => {{
+            const el = document.querySelector({json.dumps(selector)});
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        }})()"""
+        return bool(self.evaluate(js))
+
+    def assert_visible(self, selector: str, desc: str = ""):
+        """Comprueba que un selector sea visible en el viewport (no display:none, rectángulo > 0)."""
+        visible = self.is_visible(selector)
+        assert visible, f"Elemento '{selector}' ({desc}) NO es visible en pantalla (display: none, dimensiones 0 o no encontrado)."
+
+    def has_error_toast(self) -> bool:
+        """Verifica si un toast de error está actualmente visible en pantalla."""
+        js = """(() => {
+            const t = document.getElementById('toast');
+            if (!t) return false;
+            const style = window.getComputedStyle(t);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            const isError = t.hasAttribute('data-error') || t.classList.contains('toast-error') || t.innerText.toLowerCase().includes('error') || t.innerText.toLowerCase().includes('cannot read');
+            return isError && t.innerText.trim().length > 0;
+        })()"""
+        return bool(self.evaluate(js))
+
     def get_dom_html(self) -> str:
         html = self.evaluate("document.documentElement.outerHTML")
         return str(html or "")
@@ -247,13 +288,14 @@ def main():
     db_file = demo_dir / "e2e_maquinachamba.db"
     secret_file = demo_dir / ".secret_key"
     clock_file = demo_dir / "simulated_clock.txt"
+    portal_log_file = demo_dir / "portal_submissions.jsonl"
     barrier_file = demo_dir / "dispatch.barrier"
     screenshots_dir = demo_dir / "screenshots"
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
-    # Fijar reloj inicial en jueves 15 de Octubre de 2026, 10:00 UTC (04:00 hora local Ciudad de México)
+    # Fijar reloj inicial mediante FileBackedClock (escritura atómica con fsync)
     initial_clock = datetime(2026, 10, 15, 10, 0, 0, tzinfo=timezone.utc)
-    clock_file.write_text(initial_clock.isoformat(), encoding="utf-8")
+    test_clock = FileBackedClock(clock_file, fallback_initial=initial_clock)
 
     port = find_free_port()
     base_url = f"http://127.0.0.1:{port}"
@@ -263,6 +305,7 @@ def main():
     print(f"  - Base de datos SQLite: {db_file}")
     print(f"  - Archivo de clave protegida: {secret_file}")
     print(f"  - Archivo de reloj controlable: {clock_file}")
+    print(f"  - Archivo de log de portal inter-proceso: {portal_log_file}")
     print(f"  - Puerto API local: {port}")
 
     env = os.environ.copy()
@@ -274,6 +317,7 @@ def main():
     env["SIMULATION_MODE"] = "true"
     env["APP_ENV"] = "development"
     env["MAQUINACHAMBA_TEST_CLOCK_FILE"] = str(clock_file)
+    env["MAQUINACHAMBA_PORTAL_LOG_FILE"] = str(portal_log_file)
 
     server_proc = None
     chrome_proc = None
@@ -443,8 +487,10 @@ def main():
 
         # Paso 2.3: Importación de vacante desde la interfaz
         print("\n  [UI 3/6] Conmutando a pestaña Vacantes e importando nueva vacante...")
-        cdp.click("nav button:nth-child(2)")
-        time.sleep(0.5)
+        cdp.click("#nav-tab-vacancies")
+        cdp.wait_for_predicate("document.getElementById('tab-vacancies').classList.contains('active')", timeout=5.0)
+        cdp.assert_visible("#tab-vacancies", "Pestaña de Vacantes")
+        assert not cdp.has_error_toast(), "Se detectó un toast de error al conmutar a Vacantes."
         cdp.fill("#vacCompany", "Tech Corp Innovations")
         cdp.fill("#vacTitle", "Senior Backend Architect")
         cdp.fill("#vacUrl", "https://techcorp.example/careers/job-7741")
@@ -454,6 +500,7 @@ def main():
 
         # Verificar aserción visible en la tabla
         cdp.wait_for_predicate("document.getElementById('tblVacancies').innerText.includes('Senior Backend Architect')", timeout=8.0)
+        cdp.assert_visible("#tblVacancies", "Tabla de Vacantes")
         print("  Verificación visible: Vacante mostrada en la tabla de vacantes.")
         scr3 = screenshots_dir / "browser_03_vacancies.png"
         cdp.capture_screenshot(scr3)
@@ -466,28 +513,54 @@ def main():
 
         # Esperar a que la pestaña de Aprobaciones se active y cargue el contenedor de revisión
         cdp.wait_for_predicate(
-            "document.getElementById('candidacyReviewContainer').innerText.includes('Candidatura #') && "
-            "document.getElementById('candidacyReviewContainer').innerText.includes('Hash Inmutable')",
+            "document.getElementById('tab-approvals').classList.contains('active') && "
+            "document.getElementById('candidacyReviewContainer').innerText.includes('Candidatura #')",
             timeout=10.0,
         )
-        content_hash_ui = cdp.evaluate("document.querySelector('#candidacyReviewContainer .hash-tag').innerText")
-        print(f"  Verificación visible: Paquete en revisión con Hash SHA-256 inmutable: {content_hash_ui}")
+
+        # Comprobar ausencia total de toast de error
+        assert not cdp.has_error_toast(), "Se detectó un toast de error visible tras evaluar y preparar."
+
+        # Comprobar que pestaña y contenedor de revisión están activos y visibles
+        cdp.assert_visible("#tab-approvals", "Sección de Aprobaciones activa")
+        cdp.assert_visible("#candidacyReviewContainer", "Contenedor de Revisión")
+
+        # Comprobar visibilidad real de CV adaptado, carta/mensaje, hash y botón de aprobación
+        cdp.assert_visible("#txtCoverLetter", "Carta de Presentación")
+        cdp.assert_visible("#preCvSnapshot", "Resumen de CV Adaptado")
+        cdp.assert_visible("#lblContentHash", "Hash SHA-256 Inmutable")
+        cdp.assert_visible("#btnApproveCandidacy", "Botón de Aprobación")
+
+        # Comprobar que los contenidos visibles no están vacíos
+        cover_letter_val = cdp.evaluate("document.getElementById('txtCoverLetter').value")
+        cv_text = cdp.evaluate("document.getElementById('preCvSnapshot').innerText")
+        content_hash_ui = cdp.evaluate("document.getElementById('lblContentHash').innerText")
+        assert cover_letter_val and len(cover_letter_val.strip()) > 0, "La carta de presentación en pantalla está vacía."
+        assert cv_text and len(cv_text.strip()) > 0, "El resumen de CV adaptado en pantalla está vacío."
+        assert content_hash_ui and len(content_hash_ui.strip()) > 0, "El hash inmutable en pantalla está vacío."
+        print(f"  Verificación visible y renderizada: Paquete con CV, carta y Hash SHA-256 inmutable: {content_hash_ui}")
+
         scr4 = screenshots_dir / "browser_04_review_pending.png"
         cdp.capture_screenshot(scr4)
         print(f"  Screenshot guardado: {scr4.name} ({scr4.stat().st_size} bytes)")
 
         # Paso 2.5: Aprobación explícita mediante botón
-        print("\n  [UI 5/6] Aprobación humana mediante botón 'Aprobar para Mañana 🚀'...")
-        cdp.click("#candidacyReviewContainer .btn-success")
+        print("\n  [UI 5/6] Aprobación humana mediante botón visible 'Aprobar para Mañana 🚀'...")
+        cdp.click("#btnApproveCandidacy")
         time.sleep(1.0)
+        assert not cdp.has_error_toast(), "Se detectó un toast de error visible tras aprobar la candidatura."
         scr5 = screenshots_dir / "browser_05_approved.png"
         cdp.capture_screenshot(scr5)
         print(f"  Screenshot guardado: {scr5.name} ({scr5.stat().st_size} bytes)")
 
         # Paso 2.6: Consulta del CRM Kanban desde la interfaz
         print("\n  [UI 6/6] Conmutando a pestaña CRM y verificando tarjeta en columna 'Programadas'...")
-        cdp.click("nav button:nth-child(4)")
+        cdp.click("#nav-tab-crm")
+        cdp.wait_for_predicate("document.getElementById('tab-crm').classList.contains('active')", timeout=5.0)
+        cdp.assert_visible("#tab-crm", "Tablero CRM")
         cdp.wait_for_predicate("document.getElementById('cnt-scheduled').innerText === '1'", timeout=8.0)
+        cdp.assert_visible("#col-scheduled", "Columna de Postulaciones Programadas")
+        assert not cdp.has_error_toast(), "Se detectó un toast de error visible en CRM."
         cnt_sched = cdp.evaluate("document.getElementById('cnt-scheduled').innerText")
         card_title = cdp.evaluate("document.querySelector('#col-scheduled .kanban-card h3').innerText")
         assert cnt_sched == "1", f"Esperado cnt-scheduled=1, obtenido {cnt_sched}"
@@ -556,14 +629,14 @@ def main():
 
         # 3.1 Comprobación de Cero Efectos Antes del Instante Autorizado
         print("\n  [Paso 3.1] Comprobando CERO efectos antes del instante autorizado...")
-        # Avanzar el reloj a las 18:00 UTC del día de aprobación (antes de mañana)
+        # Avanzar el reloj a las 18:00 UTC del día de aprobación (antes de mañana) con escritura atómica
         sim_dt1 = datetime(2026, 10, 15, 18, 0, 0, tzinfo=timezone.utc)
-        clock_file.write_text(sim_dt1.isoformat(), encoding="utf-8")
+        test_clock.set_time(sim_dt1)
         time.sleep(1.0)  # Dejar que el demonio itere varios ciclos
 
         # Avanzar el reloj a las 12:00 UTC del día siguiente (06:00 hora local, ANTES de la ventana de 09:00)
         sim_dt2 = datetime(2026, 10, 16, 12, 0, 0, tzinfo=timezone.utc)
-        clock_file.write_text(sim_dt2.isoformat(), encoding="utf-8")
+        test_clock.set_time(sim_dt2)
         time.sleep(1.0)  # Dejar que el demonio itere varios ciclos más
 
         con = sqlite3.connect(db_file)
@@ -576,17 +649,20 @@ def main():
         crm_st = cur.fetchone()[0]
         con.close()
 
+        # Comprobar conteo inter-proceso de llamadas al portal vía archivo con lock
+        calls_before = MockPortalAdapter.get_recorded_call_count(portal_log_file)
+        assert calls_before == 0, f"Se detectaron llamadas prematuras al portal antes de la ventana: {calls_before}"
         assert t_row[0] == "pending", f"Esperado 'pending', obtenido '{t_row[0]}'"
         assert t_row[1] == 0, f"Esperado 0 intentos, obtenido {t_row[1]}"
         assert log_cnt == 0, f"Esperado 0 logs de ejecución, obtenido {log_cnt}"
         assert crm_st == "scheduled", f"Esperado CRM 'scheduled', obtenido '{crm_st}'"
-        print(f"  Verificación exitosa: status='{t_row[0]}', attempts={t_row[1]}, logs={log_cnt}, crm='{crm_st}'.")
+        print(f"  Verificación exitosa: status='{t_row[0]}', attempts={t_row[1]}, logs={log_cnt}, crm='{crm_st}', portal_calls={calls_before}.")
         print("  >> CERO EFECTOS ANTES DE LA HORA AUTORIZADA.")
 
         # 3.2 Comprobación de Un Único Efecto al Alcanzar el Instante Autorizado
         print("\n  [Paso 3.2] Avanzando reloj al instante autorizado (2026-10-16 15:05 UTC / 09:05 local)...")
         sim_dt3 = datetime(2026, 10, 16, 15, 5, 0, tzinfo=timezone.utc)
-        clock_file.write_text(sim_dt3.isoformat(), encoding="utf-8")
+        test_clock.set_time(sim_dt3)
 
         # Esperar a que el demonio en su bucle procese la tarea
         processed = False
@@ -612,11 +688,13 @@ def main():
         crm_after = cur.fetchone()[0]
         con.close()
 
+        calls_at_window = MockPortalAdapter.get_recorded_call_count(portal_log_file)
+        assert calls_at_window == 1, f"Esperada exactamente 1 llamada al portal, obtenidas {calls_at_window}"
         assert t_after[0] == "completed", f"Esperado 'completed', obtenido {t_after[0]}"
         assert t_after[1] == 1, f"Esperado attempts=1, obtenido {t_after[1]}"
         assert log_after[0] == "submit_application" and log_after[1] == "success"
         assert crm_after == "sent_confirmed"
-        print(f"  Verificación exitosa: status='{t_after[0]}', attempts={t_after[1]}, log={log_after[1]}, crm='{crm_after}'.")
+        print(f"  Verificación exitosa: status='{t_after[0]}', attempts={t_after[1]}, log={log_after[1]}, crm='{crm_after}', portal_calls={calls_at_window}.")
         print("  >> EXACTAMENTE UN EFECTO AL ALCANZAR EL INSTANTE AUTORIZADO.")
 
         # 3.3 Demostración de Persistencia y Reinicio sin Doble Ejecución
@@ -645,9 +723,11 @@ def main():
         logs_recheck = cur.fetchone()[0]
         con.close()
 
+        calls_after_restart = MockPortalAdapter.get_recorded_call_count(portal_log_file)
+        assert calls_after_restart == 1, f"Se produjeron llamadas adicionales al portal tras reiniciar el demonio: {calls_after_restart} > 1"
         assert t_recheck[0] == "completed" and t_recheck[1] == 1
         assert logs_recheck == 1, f"Se duplicó el log de ejecución tras reinicio: count={logs_recheck}"
-        print("  Verificado: El estado se preservó tras el reinicio; la tarea no se ejecutó dos veces.")
+        print(f"  Verificado: El estado se preservó tras el reinicio; llamadas al portal permanecen en {calls_after_restart} (CERO duplicados).")
 
         # =========================================================================
         # PARTE 4: INTERRUPCIÓN REAL DURANTE DESPACHO CON BARRERA Y RECUPERACIÓN
@@ -695,12 +775,12 @@ def main():
         env_barrier = env.copy()
         env_barrier["MAQUINACHAMBA_DISPATCH_BARRIER_FILE"] = str(barrier_file)
 
-        # Avanzar el reloj a 1 minuto después del instante UTC calculado para que esté dentro de ventana
+        # Avanzar el reloj a 1 minuto después del instante UTC calculado para que esté dentro de ventana (escritura atómica)
         c_inst_dt = datetime.fromisoformat(c_inst_str)
         if c_inst_dt.tzinfo is None:
             c_inst_dt = c_inst_dt.replace(tzinfo=timezone.utc)
         sim_dt_crash = c_inst_dt + timedelta(minutes=1)
-        clock_file.write_text(sim_dt_crash.isoformat(), encoding="utf-8")
+        test_clock.set_time(sim_dt_crash)
         print(f"  Reloj sincronizado al instante autorizado de la tarea: {sim_dt_crash.isoformat()}")
 
         print("  Lanzando demonio con barrera de despacho activada...")
@@ -724,6 +804,11 @@ def main():
         assert barrier_hit, "El worker no alcanzó la barrera de despacho a tiempo."
         print(f"  >> BARRERA ALCANZADA: Despacho en vuelo confirmado ({barrier_file.read_text()}).")
 
+        # Verificar que el worker 1 registró su llamada al portal en el log inter-proceso
+        calls_at_barrier = MockPortalAdapter.get_recorded_call_count(portal_log_file)
+        assert calls_at_barrier == 2, f"Esperadas 2 llamadas registradas en portal (1 anterior + 1 en vuelo), obtenidas {calls_at_barrier}"
+        print(f"  Verificación inter-proceso de llamadas al portal en vuelo: {calls_at_barrier} llamadas acumuladas.")
+
         # Comprobar en SQLite que la tarea está en estado 'executing' con dispatch_in_flight=1
         con = sqlite3.connect(db_file)
         cur = con.cursor()
@@ -743,9 +828,9 @@ def main():
         if barrier_file.exists():
             barrier_file.unlink()
 
-        # Avanzar el reloj 45 segundos para que el lease_expires_at expire
+        # Avanzar el reloj 45 segundos para que el lease_expires_at expire (escritura atómica)
         sim_dt_expired = sim_dt_crash + timedelta(seconds=45)
-        clock_file.write_text(sim_dt_expired.isoformat(), encoding="utf-8")
+        test_clock.set_time(sim_dt_expired)
         print("  Reloj avanzado 45s: el lease del worker caído ha expirado.")
 
         # Lanzar un NUEVO proceso de demonio para demostrar recuperación conservadora
@@ -769,6 +854,9 @@ def main():
         rec_crm_st = cur.fetchone()[0]
         con.close()
 
+        # Verificar que el worker de recuperación NO generó ninguna llamada duplicada al portal
+        calls_after_recovery = MockPortalAdapter.get_recorded_call_count(portal_log_file)
+        assert calls_after_recovery == 2, f"El worker de recuperación generó una llamada duplicada al portal: {calls_after_recovery} > 2"
         assert rec_st == "result_uncertain", f"Esperado status='result_uncertain', obtenido '{rec_st}'"
         assert rec_fence > fence_crash, f"Fencing token no se incrementó: {rec_fence} <= {fence_crash}"
         assert rec_crm_st == "requires_intervention", f"CRM esperado 'requires_intervention', obtenido '{rec_crm_st}'"
@@ -777,6 +865,7 @@ def main():
         print(f"    - Estado de tarea: '{rec_st}' (NO reenviada a ciegas).")
         print(f"    - Fencing token: {rec_fence} (el worker anterior queda permanentemente descartado).")
         print(f"    - Estado en CRM: '{rec_crm_st}' (solicita intervención humana).")
+        print(f"    - Conteo inter-proceso de llamadas al portal: {calls_after_recovery} (CERO llamadas duplicadas).")
         print("  >> RECUPERACIÓN EXITOSA: CERO DUPLICADOS Y AISLAMIENTO DE PROCESO CAÍDO.")
 
         # =========================================================================

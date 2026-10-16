@@ -98,11 +98,11 @@
   </header>
 
   <nav>
-    <button class="active" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
-    <button onclick="switchTab('tab-vacancies')">Vacantes e Importación</button>
-    <button onclick="switchTab('tab-approvals')">Revisión y Aprobaciones</button>
-    <button onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
-    <button onclick="switchTab('tab-execution')">Cola de Ejecución</button>
+    <button data-tab="tab-profile" id="nav-tab-profile" class="active" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
+    <button data-tab="tab-vacancies" id="nav-tab-vacancies" onclick="switchTab('tab-vacancies')">Vacantes e Importación</button>
+    <button data-tab="tab-approvals" id="nav-tab-approvals" onclick="switchTab('tab-approvals')">Revisión y Aprobaciones</button>
+    <button data-tab="tab-crm" id="nav-tab-crm" onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
+    <button data-tab="tab-execution" id="nav-tab-execution" onclick="switchTab('tab-execution')">Cola de Ejecución</button>
   </nav>
 
   <main>
@@ -396,6 +396,13 @@
       const t = document.getElementById("toast");
       t.innerText = msg;
       t.style.borderColor = isError ? "var(--danger)" : "var(--primary)";
+      if (isError) {
+        t.setAttribute("data-error", "true");
+        t.classList.add("toast-error");
+      } else {
+        t.removeAttribute("data-error");
+        t.classList.remove("toast-error");
+      }
       t.style.display = "block";
       setTimeout(() => { t.style.display = "none"; }, 4000);
     }
@@ -403,8 +410,16 @@
     function switchTab(tabId) {
       document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
       document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-      event.target.classList.add("active");
-      document.getElementById(tabId).classList.add("active");
+
+      const targetNavBtn = document.querySelector(`nav button[data-tab="${tabId}"]`) || document.getElementById(`nav-${tabId}`);
+      if (targetNavBtn) {
+        targetNavBtn.classList.add("active");
+      }
+
+      const targetTab = document.getElementById(tabId);
+      if (targetTab) {
+        targetTab.classList.add("active");
+      }
 
       if (tabId === "tab-crm") loadCRM();
       if (tabId === "tab-vacancies") loadVacancies();
@@ -629,7 +644,7 @@
         <div style="background: #131c2e; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
             <h3>Candidatura #${c.id.substring(0, 8)} - Estado: <span class="badge badge-pending">${c.status}</span></h3>
-            <div>Hash Inmutable: <span class="hash-tag">${c.content_hash.substring(0, 16)}...</span></div>
+            <div>Hash Inmutable: <span class="hash-tag" id="lblContentHash">${c.content_hash.substring(0, 16)}...</span></div>
           </div>
           <div class="grid" style="margin-bottom: 1.5rem;">
             <div>
@@ -639,12 +654,12 @@
             </div>
             <div>
               <label>Resumen de CV Adaptado</label>
-              <pre style="background: #0f172a; padding: 1rem; border-radius: 0.375rem; border: 1px solid var(--card-border); font-size: 0.8rem; overflow: auto; height: 140px;">${JSON.stringify(c.adapted_cv_snapshot, null, 2)}</pre>
+              <pre id="preCvSnapshot" style="background: #0f172a; padding: 1rem; border-radius: 0.375rem; border: 1px solid var(--card-border); font-size: 0.8rem; overflow: auto; height: 140px;">${JSON.stringify(c.adapted_cv_snapshot, null, 2)}</pre>
             </div>
           </div>
           <div style="display: flex; gap: 1rem; justify-content: flex-end; border-top: 1px solid var(--card-border); padding-top: 1rem;">
-            <button class="btn btn-danger btn-sm" onclick="rejectCandidacy('${c.id}')">Rechazar Definitivamente</button>
-            <button class="btn btn-success" onclick="approveCandidacy('${c.id}')">Aprobar para Mañana 🚀</button>
+            <button id="btnRejectCandidacy" class="btn btn-danger btn-sm" onclick="rejectCandidacy('${c.id}')">Rechazar Definitivamente</button>
+            <button id="btnApproveCandidacy" class="btn btn-success" onclick="approveCandidacy('${c.id}')">Aprobar para Mañana 🚀</button>
           </div>
         </div>
       `;
