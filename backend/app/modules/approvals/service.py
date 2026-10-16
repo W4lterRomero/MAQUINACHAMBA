@@ -4,18 +4,21 @@ Aprobación inmutable, versionado y reversión ante modificaciones no autorizada
 """
 
 from datetime import datetime, time, timezone
+import hashlib
 import json
+import os
 from typing import Optional, Tuple
-from sqlalchemy import select, update
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.clock import Clock, get_clock
 from backend.app.core.security import hash_content
-from backend.app.modules.profile.models import UserProfile
+from backend.app.modules.profile.models import UserProfile, Skill, Experience
 from backend.app.modules.cv.models import MasterCV
+from backend.app.modules.cv.generator import CVDocumentGenerator
 from backend.app.modules.vacancies.models import Vacancy
 from backend.app.modules.evaluation.models import Evaluation
-from backend.app.modules.approvals.models import Candidacy, Approval, ScheduledTask
+from backend.app.modules.approvals.models import Candidacy, Approval, ScheduledTask, CandidacyDocument
 from backend.app.modules.crm.models import CRMEntry, CRMEvent
 from backend.app.modules.scheduling.service import SchedulingService
 
@@ -28,7 +31,9 @@ class ApprovalService:
         """
         Calcula el hash determinista del paquete completo de postulación.
         Cualquier variación en el contenido genera un hash diferente.
+        Incorpora los hashes de los documentos vinculados (PDF y DOCX) (P1).
         """
+        doc_hashes = (candidacy.adapted_cv_snapshot or {}).get("document_hashes") or {}
         return hash_content(
             candidacy.id,
             candidacy.vacancy_id,
@@ -38,6 +43,8 @@ class ApprovalService:
             candidacy.target_portal,
             candidacy.target_url,
             json.dumps(candidacy.planned_actions, sort_keys=True, ensure_ascii=False),
+            doc_hashes.get("pdf", ""),
+            doc_hashes.get("docx", ""),
         )
 
     @classmethod
@@ -54,15 +61,119 @@ class ApprovalService:
         """
         Fase de preparación: compila los documentos y paquete de postulación.
         ESTRICTAMENTE NINGÚN ENVÍO durante esta fase.
+        Congela el payload completo y genera/vincula los documentos PDF y DOCX
+        con sus hashes SHA-256 antes de la aprobación (REQ-013, P1, P2).
         """
-        # Adaptación sintética del CV basada en las secciones del CV maestro
+        # Formatear ubicación congelada
+        location_str = ""
+        if profile.location_city and profile.location_country:
+            location_str = f"{profile.location_city}, {profile.location_country}"
+        elif profile.location_city:
+            location_str = profile.location_city
+
+        # Recuperar habilidades verificadas
+        s_stmt = (
+            select(Skill)
+            .where(
+                and_(
+                    Skill.tenant_id == tenant_id,
+                    Skill.verification_status == "verified",
+                )
+            )
+            .order_by(Skill.created_at.asc())
+        )
+        s_res = await session.execute(s_stmt)
+        all_verified_skills = s_res.scalars().all()
+
+        # P2: Respetar selección explícita vs ausente y no reincorporar excluidas
+        skills_to_include = []
+        if cv.sections and "skills" in cv.sections:
+            if isinstance(cv.sections["skills"], list):
+                wanted = {str(name).lower() for name in cv.sections["skills"]}
+                skills_to_include = [s for s in all_verified_skills if s.name.lower() in wanted]
+            else:
+                skills_to_include = []
+        elif cv.sections and "included_skills" in cv.sections:
+            if isinstance(cv.sections["included_skills"], list):
+                wanted = {str(name).lower() for name in cv.sections["included_skills"]}
+                skills_to_include = [s for s in all_verified_skills if s.name.lower() in wanted]
+            else:
+                skills_to_include = []
+        else:
+            skills_to_include = list(all_verified_skills)
+
+        frozen_skills = [
+            {
+                "name": s.name,
+                "category": s.category,
+                "proficiency": s.proficiency,
+                "years_experience": s.years_experience,
+            }
+            for s in skills_to_include
+        ]
+
+        # Recuperar experiencia laboral verificada
+        e_stmt = (
+            select(Experience)
+            .where(
+                and_(
+                    Experience.tenant_id == tenant_id,
+                    Experience.verification_status == "verified",
+                )
+            )
+            .order_by(Experience.start_date.desc().nullslast())
+        )
+        e_res = await session.execute(e_stmt)
+        verified_experiences = e_res.scalars().all()
+
+        frozen_experiences = [
+            {
+                "company": e.company,
+                "title": e.title,
+                "start_date": str(e.start_date) if e.start_date else None,
+                "end_date": str(e.end_date) if e.end_date else None,
+                "description": e.description,
+                "skills_used": e.skills_used if isinstance(e.skills_used, list) else [],
+            }
+            for e in verified_experiences
+        ]
+
+        # Payload completo congelado del CV adaptado
         adapted_cv = {
             "name": profile.full_name,
+            "full_name": profile.full_name,
             "email": profile.email,
+            "phone": profile.phone,
+            "location": location_str,
             "title": cv.specialization or vacancy.job_title,
+            "specialization": cv.specialization or vacancy.job_title,
             "summary": cv.summary or f"Profesional especializado en {cv.specialization}",
             "sections": cv.sections or {},
+            "skills": frozen_skills,
+            "experiences": frozen_experiences,
             "version": cv.version,
+            "document_hashes": {},
+        }
+
+        # Generar documentos PDF y DOCX vinculados antes de aprobar (P1)
+        cv_doc_payload = {
+            "full_name": adapted_cv["full_name"],
+            "email": adapted_cv["email"],
+            "phone": adapted_cv["phone"],
+            "location": adapted_cv["location"],
+            "specialization": adapted_cv["specialization"],
+            "summary": adapted_cv["summary"],
+            "skills": adapted_cv["skills"],
+            "experiences": adapted_cv["experiences"],
+        }
+        pdf_bytes = CVDocumentGenerator.generate_pdf(cv_doc_payload)
+        docx_bytes = CVDocumentGenerator.generate_docx(cv_doc_payload)
+        pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+        docx_hash = hashlib.sha256(docx_bytes).hexdigest()
+
+        adapted_cv["document_hashes"] = {
+            "pdf": pdf_hash,
+            "docx": docx_hash,
         }
 
         if cover_letter:
@@ -84,7 +195,6 @@ class ApprovalService:
                     f"Cuento con experiencia alineada a sus requerimientos técnicos.\n\n"
                     f"Atentamente,\n{profile.full_name}"
                 )
-
 
         planned_actions = [
             {"action": "authenticate_session", "target": vacancy.source},
@@ -108,6 +218,39 @@ class ApprovalService:
             version=1,
         )
         session.add(candidacy)
+        await session.flush()
+
+        # Persistir los archivos físicos vinculados en el directorio del tenant
+        docs_dir = os.path.join("data", "documents", tenant_id)
+        os.makedirs(docs_dir, exist_ok=True)
+        pdf_filename = f"Candidatura_{candidacy.id[:8]}_CV_v1.pdf"
+        docx_filename = f"Candidatura_{candidacy.id[:8]}_CV_v1.docx"
+        pdf_path = os.path.join(docs_dir, pdf_filename)
+        docx_path = os.path.join(docs_dir, docx_filename)
+
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+        with open(docx_path, "wb") as f:
+            f.write(docx_bytes)
+
+        cand_doc_pdf = CandidacyDocument(
+            tenant_id=tenant_id,
+            candidacy_id=candidacy.id,
+            document_type="cv_pdf",
+            file_path=pdf_path,
+            file_hash=pdf_hash,
+            version=candidacy.version,
+        )
+        cand_doc_docx = CandidacyDocument(
+            tenant_id=tenant_id,
+            candidacy_id=candidacy.id,
+            document_type="cv_docx",
+            file_path=docx_path,
+            file_hash=docx_hash,
+            version=candidacy.version,
+        )
+        session.add(cand_doc_pdf)
+        session.add(cand_doc_docx)
         await session.flush()
 
         # Registro inicial en CRM
@@ -166,6 +309,7 @@ class ApprovalService:
         content_hash = cls.compute_candidacy_hash(candidacy)
 
         # 3. Crear registro inmutable de aprobación
+        doc_hashes = (candidacy.adapted_cv_snapshot or {}).get("document_hashes") or {}
         approval = Approval(
             tenant_id=tenant_id,
             candidacy_id=candidacy.id,
@@ -176,6 +320,8 @@ class ApprovalService:
             document_versions={
                 "candidacy_version": candidacy.version,
                 "cv_version": candidacy.adapted_cv_snapshot.get("version", 1),
+                "cv_pdf_hash": doc_hashes.get("pdf", ""),
+                "cv_docx_hash": doc_hashes.get("docx", ""),
             },
             notes=notes,
         )
@@ -360,6 +506,59 @@ class ApprovalService:
 
         candidacy.version += 1
         candidacy.status = "pending_approval"
+
+        # Regenerar y vincular documentos para la nueva versión de candidatura
+        snap = candidacy.adapted_cv_snapshot or {}
+        cv_doc_payload = {
+            "full_name": snap.get("full_name") or snap.get("name") or "Candidato",
+            "email": snap.get("email") or "",
+            "phone": snap.get("phone"),
+            "location": snap.get("location") or "",
+            "specialization": snap.get("specialization") or snap.get("title") or "Candidatura Especializada",
+            "summary": snap.get("summary") or "",
+            "skills": snap.get("skills") or [],
+            "experiences": snap.get("experiences") or [],
+        }
+        pdf_bytes = CVDocumentGenerator.generate_pdf(cv_doc_payload)
+        docx_bytes = CVDocumentGenerator.generate_docx(cv_doc_payload)
+        pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+        docx_hash = hashlib.sha256(docx_bytes).hexdigest()
+
+        # Actualizar hashes en snapshot
+        snap = dict(snap)
+        snap["document_hashes"] = {"pdf": pdf_hash, "docx": docx_hash}
+        candidacy.adapted_cv_snapshot = snap
+
+        docs_dir = os.path.join("data", "documents", tenant_id)
+        os.makedirs(docs_dir, exist_ok=True)
+        pdf_filename = f"Candidatura_{candidacy.id[:8]}_CV_v{candidacy.version}.pdf"
+        docx_filename = f"Candidatura_{candidacy.id[:8]}_CV_v{candidacy.version}.docx"
+        pdf_path = os.path.join(docs_dir, pdf_filename)
+        docx_path = os.path.join(docs_dir, docx_filename)
+
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+        with open(docx_path, "wb") as f:
+            f.write(docx_bytes)
+
+        cand_doc_pdf = CandidacyDocument(
+            tenant_id=tenant_id,
+            candidacy_id=candidacy.id,
+            document_type="cv_pdf",
+            file_path=pdf_path,
+            file_hash=pdf_hash,
+            version=candidacy.version,
+        )
+        cand_doc_docx = CandidacyDocument(
+            tenant_id=tenant_id,
+            candidacy_id=candidacy.id,
+            document_type="cv_docx",
+            file_path=docx_path,
+            file_hash=docx_hash,
+            version=candidacy.version,
+        )
+        session.add(cand_doc_pdf)
+        session.add(cand_doc_docx)
 
         crm_res = await session.execute(
             select(CRMEntry).where(

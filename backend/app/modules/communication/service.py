@@ -645,10 +645,17 @@ class CommunicationService:
         verified_skills = [s for s in skills_res.scalars().all()]
 
         # Si el CV tiene secciones con lista de habilidades verificadas específicas, priorizarlas
+        # P2: Respetar selección explícita vs ausente y no reincorporar habilidades excluidas
         if cv and cv.sections and "skills" in cv.sections:
             cv_skills = cv.sections["skills"]
-            if isinstance(cv_skills, list) and cv_skills:
-                verified_skills = [s for s in cv_skills if s in verified_skills] or verified_skills
+            if isinstance(cv_skills, list):
+                wanted = {str(s).lower() for s in cv_skills}
+                verified_skills = [s for s in verified_skills if s.lower() in wanted]
+        elif cv and cv.sections and "included_skills" in cv.sections:
+            cv_skills = cv.sections["included_skills"]
+            if isinstance(cv_skills, list):
+                wanted = {str(s).lower() for s in cv_skills}
+                verified_skills = [s for s in verified_skills if s.lower() in wanted]
 
         # Experiencia verificada
         exp_stmt = (

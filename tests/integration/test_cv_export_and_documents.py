@@ -336,3 +336,284 @@ async def test_immutability_tampering_detection_on_approved_candidacy(client: As
     assert tampered_res.status_code == 409
     assert "integridad comprometida" in tampered_res.json()["detail"].lower()
 
+
+@pytest.mark.asyncio
+async def test_export_candidacy_retains_frozen_snapshot_ignoring_subsequent_profile_changes(client: AsyncClient):
+    """
+    Verifica que la exportación de una candidatura aprobada retenga fielmente el snapshot
+    congelado (nombre, teléfono, ubicación, habilidades, experiencias) e ignore cualquier
+    modificación posterior en el perfil activo (P1).
+    """
+    import zipfile
+    uid = uuid.uuid4().hex[:8]
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"freeze_{uid}@example.com",
+        "password": "Password123!",
+        "full_name": "Daniela Frozen",
+    })
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Configurar perfil inicial
+    await client.post("/api/v1/profile", json={
+        "full_name": "Daniela Frozen",
+        "email": f"freeze_{uid}@example.com",
+        "phone": "+52 33 1111 2222",
+        "location_city": "Guadalajara",
+        "location_country": "México",
+    }, headers=headers)
+
+    # 2. Habilidades y experiencia verificadas
+    cv_text = (
+        "Daniela Frozen\n"
+        "Guadalajara, México\n\n"
+        "Habilidades:\n"
+        "- Python avanzado\n"
+        "- PostgreSQL intermedio\n\n"
+        "Experiencia:\n"
+        "Desarrolladora Backend - Tech GDL\n"
+        "2021 - 2023\n"
+        "Diseño de bases de datos relacionales y microservicios."
+    )
+    await client.post("/api/v1/profile/sources/import", json={
+        "source_type": "cv_text",
+        "source_name": "CV_Daniela.txt",
+        "raw_text": cv_text,
+    }, headers=headers)
+
+    pending = await client.get("/api/v1/profile/items/pending", headers=headers)
+    for s in pending.json()["pending_skills"]:
+        await client.post(f"/api/v1/profile/items/skills/{s['id']}/review", json={"decision": "accept"}, headers=headers)
+    for e in pending.json()["pending_experiences"]:
+        await client.post(f"/api/v1/profile/items/experiences/{e['id']}/review", json={"decision": "accept"}, headers=headers)
+
+    await client.post("/api/v1/profile/verify", headers=headers)
+
+    # 3. Crear CV Maestro y Vacante
+    mcv_res = await client.post("/api/v1/profile/cv", json={
+        "name": "CV Backend Inicial",
+        "specialization": "Backend Engineering",
+    }, headers=headers)
+    cv_id = mcv_res.json()["id"]
+
+    vac_res = await client.post("/api/v1/vacancies", json={
+        "company_name": "Enterprise GDL",
+        "job_title": "Senior Backend Developer",
+        "source": "portal_mock",
+        "source_url": "https://jobs.example.com/backend-gdl",
+    }, headers=headers)
+    vac_id = vac_res.json()["id"]
+
+    # 4. Preparar y Aprobar candidatura
+    prep_res = await client.post("/api/v1/candidacies/prepare", json={
+        "vacancy_id": vac_id,
+        "cv_id": cv_id,
+    }, headers=headers)
+    assert prep_res.status_code == 201
+    cand_id = prep_res.json()["id"]
+
+    appr_res = await client.post(f"/api/v1/candidacies/{cand_id}/approve", json={
+        "user_timezone": "America/Mexico_City",
+    }, headers=headers)
+    assert appr_res.status_code == 200
+
+    # 5. Modificar el perfil activo del usuario radicalmente
+    await client.post("/api/v1/profile", json={
+        "full_name": "Daniela MODIFICADA",
+        "email": f"freeze_{uid}@example.com",
+        "phone": "+52 81 9999 8888",
+        "location_city": "Monterrey",
+        "location_country": "México",
+    }, headers=headers)
+
+    # Añadir nueva habilidad verificada al perfil vivo
+    await client.post("/api/v1/profile/sources/import", json={
+        "source_type": "cv_text",
+        "source_name": "CV_Extra.txt",
+        "raw_text": "Habilidades:\n- Rust avanzado\n",
+    }, headers=headers)
+    pending_extra = await client.get("/api/v1/profile/items/pending", headers=headers)
+    for s in pending_extra.json()["pending_skills"]:
+        await client.post(f"/api/v1/profile/items/skills/{s['id']}/review", json={"decision": "accept"}, headers=headers)
+
+    # 6. Exportar candidatura aprobada en DOCX
+    docx_res = await client.get(f"/api/v1/candidacies/{cand_id}/export/docx", headers=headers)
+    assert docx_res.status_code == 200
+    docx_zip = zipfile.ZipFile(io.BytesIO(docx_res.content))
+    doc_xml = docx_zip.read("word/document.xml").decode("utf-8")
+
+    # Debe contener los datos congelados del momento de preparación
+    assert "Guadalajara" in doc_xml
+    assert "+52 33 1111 2222" in doc_xml
+    assert "Python" in doc_xml
+    assert "Postgresql" in doc_xml or "PostgreSQL" in doc_xml
+
+    # NO debe contener las modificaciones posteriores del perfil
+    assert "Monterrey" not in doc_xml
+    assert "+52 81 9999 8888" not in doc_xml
+    assert "MODIFICADA" not in doc_xml
+    assert "Rust" not in doc_xml
+
+
+@pytest.mark.asyncio
+async def test_export_candidacy_fails_if_file_deleted_after_approval_no_regeneration(client: AsyncClient):
+    """
+    Verifica que si el archivo físico de una candidatura aprobada es eliminado del disco,
+    el sistema rechace con 409 Conflict y NO regenere silenciosamente el archivo (P1).
+    """
+    import os
+    uid = uuid.uuid4().hex[:8]
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"deleted_file_{uid}@example.com",
+        "password": "Password123!",
+        "full_name": "Mario Guardián",
+    })
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    await client.post("/api/v1/profile", json={
+        "full_name": "Mario Guardián",
+        "email": f"deleted_file_{uid}@example.com",
+    }, headers=headers)
+
+    cv_res = await client.post("/api/v1/profile/cv", json={
+        "name": "CV Guardián",
+        "specialization": "Ciberseguridad",
+    }, headers=headers)
+    cv_id = cv_res.json()["id"]
+
+    vac_res = await client.post("/api/v1/vacancies", json={
+        "company_name": "Security Labs",
+        "job_title": "Security Analyst",
+        "source": "portal_mock",
+        "source_url": "https://jobs.example.com/sec",
+    }, headers=headers)
+    vac_id = vac_res.json()["id"]
+
+    prep_res = await client.post("/api/v1/candidacies/prepare", json={
+        "vacancy_id": vac_id,
+        "cv_id": cv_id,
+    }, headers=headers)
+    cand_id = prep_res.json()["id"]
+
+    # Aprobar candidatura
+    appr_res = await client.post(f"/api/v1/candidacies/{cand_id}/approve", json={
+        "user_timezone": "America/Mexico_City",
+    }, headers=headers)
+    assert appr_res.status_code == 200
+
+    # Localizar archivo físico en disco y eliminarlo
+    t_id = reg.json()["tenant_id"]
+    pdf_path = os.path.join("data", "documents", t_id, f"Candidatura_{cand_id[:8]}_CV_v1.pdf")
+    assert os.path.exists(pdf_path)
+    os.remove(pdf_path)
+    assert not os.path.exists(pdf_path)
+
+    # Intentar exportar: debe fallar con 409 Conflict y NO regenerar el archivo
+    export_res = await client.get(f"/api/v1/candidacies/{cand_id}/export/pdf", headers=headers)
+    assert export_res.status_code == 409
+    assert "no se permite regenerar tras la aprobación" in export_res.json()["detail"].lower() or "no disponible en disco" in export_res.json()["detail"].lower()
+
+    # Comprobar que el archivo continúa sin existir en disco (cero regeneración silenciosa)
+    assert not os.path.exists(pdf_path)
+
+
+@pytest.mark.asyncio
+async def test_export_respects_explicit_empty_skills_selection_p2(client: AsyncClient):
+    """
+    Verifica que una selección vacía explícita de habilidades (sections={"skills": []})
+    se respete estrictamente y no reincorpore las habilidades verificadas del usuario (P2).
+    """
+    import zipfile
+    uid = uuid.uuid4().hex[:8]
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"empty_skills_{uid}@example.com",
+        "password": "Password123!",
+        "full_name": "Fernanda SinSkills",
+    })
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    await client.post("/api/v1/profile", json={
+        "full_name": "Fernanda SinSkills",
+        "email": f"empty_skills_{uid}@example.com",
+    }, headers=headers)
+
+    # Verificar 3 habilidades
+    cv_text = "Habilidades:\n- Python avanzado\n- Docker intermedio\n- Kubernetes básico\n"
+    await client.post("/api/v1/profile/sources/import", json={
+        "source_type": "cv_text",
+        "source_name": "CV_Fernanda.txt",
+        "raw_text": cv_text,
+    }, headers=headers)
+    pending = await client.get("/api/v1/profile/items/pending", headers=headers)
+    for s in pending.json()["pending_skills"]:
+        await client.post(f"/api/v1/profile/items/skills/{s['id']}/review", json={"decision": "accept"}, headers=headers)
+    await client.post("/api/v1/profile/verify", headers=headers)
+
+    # 1. Crear CV maestro con selección de habilidades explícitamente vacía: []
+    cv_empty_res = await client.post("/api/v1/profile/cv", json={
+        "name": "CV Sin Habilidades",
+        "specialization": "Gestión de Proyectos",
+        "sections": {"skills": []},
+    }, headers=headers)
+    cv_empty_id = cv_empty_res.json()["id"]
+
+    # Exportar CV maestro en DOCX
+    docx_empty = await client.get(f"/api/v1/profile/cv/{cv_empty_id}/export/docx", headers=headers)
+    assert docx_empty.status_code == 200
+    docx_zip_empty = zipfile.ZipFile(io.BytesIO(docx_empty.content))
+    doc_xml_empty = docx_zip_empty.read("word/document.xml").decode("utf-8")
+
+    # Ninguna habilidad debe reincorporarse
+    assert "Python" not in doc_xml_empty
+    assert "Docker" not in doc_xml_empty
+    assert "Kubernetes" not in doc_xml_empty
+
+    # 2. Crear CV maestro con secciones ausentes de skills (debe incluir todas por defecto)
+    cv_all_res = await client.post("/api/v1/profile/cv", json={
+        "name": "CV Con Todas",
+        "specialization": "DevOps",
+        "sections": {},
+    }, headers=headers)
+    cv_all_id = cv_all_res.json()["id"]
+
+    docx_all = await client.get(f"/api/v1/profile/cv/{cv_all_id}/export/docx", headers=headers)
+    assert docx_all.status_code == 200
+    docx_zip_all = zipfile.ZipFile(io.BytesIO(docx_all.content))
+    doc_xml_all = docx_zip_all.read("word/document.xml").decode("utf-8")
+
+    # Debe incluir todas las habilidades verificadas
+    assert "Python" in doc_xml_all
+    assert "Docker" in doc_xml_all
+    assert "Kubernetes" in doc_xml_all
+
+    # 3. Preparar candidatura con CV maestro de habilidades vacías
+    vac_res = await client.post("/api/v1/vacancies", json={
+        "company_name": "PM Corp",
+        "job_title": "Project Manager",
+        "source": "portal_mock",
+        "source_url": "https://jobs.example.com/pm",
+    }, headers=headers)
+    vac_id = vac_res.json()["id"]
+
+    prep_res = await client.post("/api/v1/candidacies/prepare", json={
+        "vacancy_id": vac_id,
+        "cv_id": cv_empty_id,
+    }, headers=headers)
+    cand_id = prep_res.json()["id"]
+
+    # Verificar que el snapshot congelado tiene lista vacía de habilidades
+    cand_detail = await client.get(f"/api/v1/candidacies/{cand_id}", headers=headers)
+    assert cand_detail.json()["candidacy"]["adapted_cv_snapshot"]["skills"] == []
+
+    # Exportar candidatura DOCX
+    cand_docx = await client.get(f"/api/v1/candidacies/{cand_id}/export/docx", headers=headers)
+    assert cand_docx.status_code == 200
+    cand_docx_zip = zipfile.ZipFile(io.BytesIO(cand_docx.content))
+    cand_doc_xml = cand_docx_zip.read("word/document.xml").decode("utf-8")
+    assert "Python" not in cand_doc_xml
+    assert "Docker" not in cand_doc_xml
+    assert "Kubernetes" not in cand_doc_xml
+
+

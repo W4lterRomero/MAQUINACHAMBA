@@ -92,13 +92,25 @@ class CVService:
         all_verified_skills = s_res.scalars().all()
 
         # Filtrar o priorizar habilidades si el CV maestro especifica secciones de habilidades
+        # P2: Distinguir selección ausente de lista vacía explícita y no reincorporar habilidades excluidas.
         skills_to_include = []
-        if cv.sections and isinstance(cv.sections.get("skills"), list):
-            wanted_skill_names = {str(name).lower() for name in cv.sections["skills"]}
-            skills_to_include = [
-                s for s in all_verified_skills if s.name.lower() in wanted_skill_names
-            ]
-        if not skills_to_include:
+        if cv.sections and "skills" in cv.sections:
+            if isinstance(cv.sections["skills"], list):
+                wanted_skill_names = {str(name).lower() for name in cv.sections["skills"]}
+                skills_to_include = [
+                    s for s in all_verified_skills if s.name.lower() in wanted_skill_names
+                ]
+            else:
+                skills_to_include = []
+        elif cv.sections and "included_skills" in cv.sections:
+            if isinstance(cv.sections["included_skills"], list):
+                wanted_skill_names = {str(name).lower() for name in cv.sections["included_skills"]}
+                skills_to_include = [
+                    s for s in all_verified_skills if s.name.lower() in wanted_skill_names
+                ]
+            else:
+                skills_to_include = []
+        else:
             skills_to_include = list(all_verified_skills)
 
         # 4. Recuperar experiencia laboral verificada
@@ -174,12 +186,15 @@ class CVService:
     ) -> Tuple[bytes, str, str, str]:
         """
         Exporta el CV adaptado a partir del snapshot congelado de una candidatura.
-        Vincular versión/hash del archivo al paquete revisado y previene sustituciones silenciosas.
+        Sirve exclusivamente el artefacto vinculado y previene sustituciones silenciosas
+        o regeneraciones tras la aprobación (REQ-013, ADR-003, Hito 2.3, P1).
         Retorna (content_bytes, filename, media_type, file_hash).
         """
         fmt = format_type.strip().lower()
         if fmt not in cls.SUPPORTED_FORMATS:
-            raise CVServiceError(f"Formato no soportado '{format_type}'. Formatos permitidos: {sorted(cls.SUPPORTED_FORMATS)}")
+            raise CVServiceError(
+                f"Formato no soportado '{format_type}'. Formatos permitidos: {sorted(cls.SUPPORTED_FORMATS)}"
+            )
 
         doc_type = f"cv_{fmt}"
 
@@ -192,96 +207,10 @@ class CVService:
         if not candidacy:
             raise CVServiceNotFoundError(f"Candidatura '{candidacy_id}' no encontrada.")
 
-        # 2. Recuperar perfil de usuario
-        p_stmt = select(UserProfile).where(UserProfile.tenant_id == tenant_id)
-        p_res = await session.execute(p_stmt)
-        profile = p_res.scalar_one_or_none()
-
-        # 3. Snapshot congelado del CV adaptado
-        snapshot = candidacy.adapted_cv_snapshot or {}
-
-        # 4. Habilidades verificadas (respetando la selección congelada del snapshot)
-        s_stmt = (
-            select(Skill)
-            .where(
-                and_(
-                    Skill.tenant_id == tenant_id,
-                    Skill.verification_status == "verified",
-                )
-            )
-            .order_by(Skill.created_at.asc())
-        )
-        s_res = await session.execute(s_stmt)
-        all_verified_skills = s_res.scalars().all()
-
-        snapshot_sections = snapshot.get("sections") or {}
-        skills_to_include = []
-        if isinstance(snapshot_sections.get("skills"), list):
-            wanted = {str(w).lower() for w in snapshot_sections["skills"]}
-            skills_to_include = [s for s in all_verified_skills if s.name.lower() in wanted]
-        if not skills_to_include:
-            skills_to_include = list(all_verified_skills)
-
-        # 5. Experiencias verificadas
-        e_stmt = (
-            select(Experience)
-            .where(
-                and_(
-                    Experience.tenant_id == tenant_id,
-                    Experience.verification_status == "verified",
-                )
-            )
-            .order_by(Experience.start_date.desc().nullslast())
-        )
-        e_res = await session.execute(e_stmt)
-        verified_experiences = e_res.scalars().all()
-
-        location_str = ""
-        if profile and profile.location_city and profile.location_country:
-            location_str = f"{profile.location_city}, {profile.location_country}"
-        elif profile and profile.location_city:
-            location_str = profile.location_city
-
-        cv_payload = {
-            "full_name": snapshot.get("name") or (profile.full_name if profile else "Candidato"),
-            "email": snapshot.get("email") or (profile.email if profile else ""),
-            "phone": profile.phone if profile else None,
-            "location": location_str,
-            "specialization": snapshot.get("title") or "Candidatura Especializada",
-            "summary": snapshot.get("summary") or "",
-            "skills": [
-                {
-                    "name": s.name,
-                    "category": s.category,
-                    "proficiency": s.proficiency,
-                    "years_experience": s.years_experience,
-                }
-                for s in skills_to_include
-            ],
-            "experiences": [
-                {
-                    "company": e.company,
-                    "title": e.title,
-                    "start_date": str(e.start_date) if e.start_date else None,
-                    "end_date": str(e.end_date) if e.end_date else None,
-                    "description": e.description,
-                    "skills_used": e.skills_used if isinstance(e.skills_used, list) else [],
-                }
-                for e in verified_experiences
-            ],
-        }
-
-        # 6. Generar documento
-        if fmt == "pdf":
-            content_bytes = CVDocumentGenerator.generate_pdf(cv_payload)
-        else:
-            content_bytes = CVDocumentGenerator.generate_docx(cv_payload)
-
-        file_hash = hashlib.sha256(content_bytes).hexdigest()
-        media_type = cls.MEDIA_TYPES[fmt]
         filename = f"Candidatura_{candidacy.id[:8]}_CV_v{candidacy.version}.{fmt}"
+        media_type = cls.MEDIA_TYPES[fmt]
 
-        # 7. Inmutabilidad y vinculación documental (REQ-013, ADR-003)
+        # 2. Inmutabilidad y vinculación documental (REQ-013, ADR-003, P1)
         doc_stmt = select(CandidacyDocument).where(
             and_(
                 CandidacyDocument.candidacy_id == candidacy.id,
@@ -300,19 +229,55 @@ class CVService:
             "sent_confirmed",
         }
 
-        # Si el documento ya fue generado y registrado para esta versión
-        if existing_doc and os.path.exists(existing_doc.file_path):
+        # TRAS APROBACIÓN:
+        # Se sirve estrictamente el artefacto físico en disco con hash verificado.
+        # NUNCA se regenera tras aprobación ni se admiten discrepancias de hash o archivos perdidos.
+        if is_approved_or_later:
+            if not existing_doc or not os.path.exists(existing_doc.file_path):
+                raise CVServiceImmutableError(
+                    "Documento de candidatura aprobado no disponible en disco. No se permite regenerar tras la aprobación."
+                )
+
             with open(existing_doc.file_path, "rb") as f:
                 saved_bytes = f.read()
-            # Verificar integridad estricta del archivo persistido contra el hash registrado
+
             saved_hash = hashlib.sha256(saved_bytes).hexdigest()
-            if is_approved_or_later and saved_hash != existing_doc.file_hash:
+            if saved_hash != existing_doc.file_hash:
                 raise CVServiceImmutableError(
                     "Integridad comprometida: el archivo en disco no coincide con el hash del paquete aprobado."
                 )
+
             return saved_bytes, filename, media_type, existing_doc.file_hash
 
-        # Si no existía aún en disco, persistir el nuevo documento
+        # ANTES DE APROBACIÓN (fase de revisión / borrador):
+        # Si el documento ya fue generado en la fase de preparación y existe en disco
+        if existing_doc and os.path.exists(existing_doc.file_path):
+            with open(existing_doc.file_path, "rb") as f:
+                saved_bytes = f.read()
+            saved_hash = hashlib.sha256(saved_bytes).hexdigest()
+            return saved_bytes, filename, media_type, saved_hash
+
+        # Si aún no existe en disco (ej. fixtures de test antiguos sin llamar a prepare_candidacy),
+        # generarlo basándose EXCLUSIVAMENTE en el snapshot congelado (NUNCA en datos vivos de perfil)
+        snapshot = candidacy.adapted_cv_snapshot or {}
+        cv_payload = {
+            "full_name": snapshot.get("full_name") or snapshot.get("name") or "Candidato",
+            "email": snapshot.get("email") or "",
+            "phone": snapshot.get("phone"),
+            "location": snapshot.get("location") or "",
+            "specialization": snapshot.get("specialization") or snapshot.get("title") or "Candidatura Especializada",
+            "summary": snapshot.get("summary") or "",
+            "skills": snapshot.get("skills") or [],
+            "experiences": snapshot.get("experiences") or [],
+        }
+
+        if fmt == "pdf":
+            content_bytes = CVDocumentGenerator.generate_pdf(cv_payload)
+        else:
+            content_bytes = CVDocumentGenerator.generate_docx(cv_payload)
+
+        file_hash = hashlib.sha256(content_bytes).hexdigest()
+
         docs_dir = os.path.join("data", "documents", tenant_id)
         os.makedirs(docs_dir, exist_ok=True)
         local_path = os.path.join(docs_dir, filename)
@@ -329,10 +294,15 @@ class CVService:
                 version=candidacy.version,
             )
             session.add(cand_doc)
-            await session.commit()
         else:
             existing_doc.file_path = local_path
             existing_doc.file_hash = file_hash
-            await session.commit()
 
+        # Sincronizar hash en snapshot
+        snapshot_copy = dict(snapshot)
+        doc_hashes = snapshot_copy.setdefault("document_hashes", {})
+        doc_hashes[fmt] = file_hash
+        candidacy.adapted_cv_snapshot = snapshot_copy
+
+        await session.commit()
         return content_bytes, filename, media_type, file_hash

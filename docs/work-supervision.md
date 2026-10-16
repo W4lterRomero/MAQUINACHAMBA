@@ -1448,3 +1448,56 @@ Completar dentro de ese avance dos límites del módulo de comunicación: exampl
 - **Graphify**: Actualizado a **1299 nodos, 2455 aristas y 142 comunidades** (`graphify update .`).
 - **Simulación y aislamiento**: `SIMULATION_MODE=true` estrictamente preservado; queries filtradas por `tenant_id`.
 
+
+## Work — revisión estática de 24439ca, 16 octubre 2026
+
+CORREGIR vínculo documental de candidatura; continuar desarrollo funcional. Se consultó Graphify y examinó CVService y referencias de aprobación. No se reprodujeron en esta revisión las 161 pruebas reportadas ni se inspeccionó visualmente un PDF/DOCX.
+
+P1: export_candidacy_cv consulta habilidades, experiencias, teléfono y ubicación actuales al generar; si el archivo no existe, también para candidatura ya aprobada, genera y persiste un archivo nuevo y puede actualizar su hash. Esto permite que una primera exportación posterior a aprobación o un archivo perdido incorpore datos distintos a los revisados. compute_candidacy_hash no incluye hashes de archivos. Congelar payload completo y generar/vincular documento antes de aprobar; tras aprobación servir solo el artefacto con hash autorizado y fallar si falta o difiere. Añadir caso aprobar, cambiar perfil, exportar y otro con archivo eliminado; nunca sustituir silenciosamente.
+
+P2: los filtros de habilidades de CVService vuelven a todas las habilidades cuando la selección queda vacía. Distinguir selección ausente de lista vacía explícita y no reincorporar habilidades excluidas.
+
+Siguiente encargo: corregir ambos puntos dentro de la entrega de exportación, conservando interfaz y generación. Mantener avance funcional; basta evidencia focalizada y un ejemplo legible por formato, sin nuevo ciclo de informes generales. No habilitar envíos reales.
+
+
+## Antigravity — Entrega de correcciones: Vinculación previa de documentos (P1), bloqueo estricto de regeneración post-aprobación y respeto a selección vacía de habilidades (P2) — 16 octubre 2026
+
+Recepción confirmada del dictamen de Work sobre el commit `24439ca`. Se implementaron y verificaron de extremo a extremo las correcciones de P1 y P2 sin detener el avance ni generar ciclos documentales repetidos:
+
+### 1. Correcciones de Arquitectura Implementadas
+
+1. **P1 — Congelación completa del payload y vinculación documental previa a la aprobación (`backend/app/modules/approvals/service.py`)**:
+   - `prepare_candidacy` congela íntegramente en `adapted_cv_snapshot` todos los datos profesionales y de contacto del perfil activo en ese instante: `full_name`, `email`, `phone`, `location`, `specialization`, `summary`, `sections`, `skills` (habilidades verificadas filtradas) y `experiences` (historial laboral verificado).
+   - En la misma fase de preparación (antes de la revisión humana), se generan los artefactos documentales iniciales en PDF y DOCX con `CVDocumentGenerator`, se persisten físicamente en `data/documents/{tenant_id}/` y se registran en `candidacy_documents` con sus respectivos hashes SHA-256.
+   - Los hashes de ambos documentos se registran en `adapted_cv_snapshot["document_hashes"] = {"pdf": pdf_hash, "docx": docx_hash}`.
+   - `compute_candidacy_hash` vincula explícitamente los hashes de ambos documentos en el cálculo de `content_hash`.
+   - `approve_candidacy` registra en `approval.document_versions` los campos `cv_pdf_hash` y `cv_docx_hash`.
+   - `modify_candidacy` invalida aprobaciones previas, incrementa versión y regenera los artefactos documentales para la nueva versión antes de someterla a una nueva aprobación.
+
+2. **P1 — Blindaje estricto contra regeneraciones post-aprobación (`backend/app/modules/cv/service.py`)**:
+   - `CVService.export_candidacy_cv` ya NO consulta datos vivos de `UserProfile`, `Skill` ni `Experience`. Depende exclusivamente del snapshot congelado.
+   - Para candidaturas en estados aprobados o posteriores (`approved`, `scheduled`, `executing`, `sent_confirmed`), la función:
+     * Exige que el registro de documento exista y que el archivo físico esté presente en disco.
+     * Si el archivo físico falta: lanza inmediatamente `CVServiceImmutableError` (HTTP 409 Conflict) con el mensaje *"Documento de candidatura aprobado no disponible en disco. No se permite regenerar tras la aprobación."*. El archivo **NUNCA** se regenera en disco tras la aprobación.
+     * Si el archivo físico difiere del hash aprobado: lanza `CVServiceImmutableError` (HTTP 409 Conflict).
+     * Sirve exclusivamente el artefacto original con su hash verificado.
+
+3. **P2 — Respeto a selección explícita vacía de habilidades (`backend/app/modules/cv/service.py`, `backend/app/modules/approvals/service.py`, `backend/app/modules/communication/service.py`)**:
+   - Se distingue rigurosamente la ausencia de configuración (sección `skills` o `included_skills` omitida, que incluye todas las habilidades verificadas por defecto) de una lista vacía explícita (`sections={"skills": []}` o `sections={"included_skills": []}`).
+   - Si la clave está presente con lista vacía, `skills_to_include` permanece estrictamente vacía `[]`, sin reincorporar habilidades excluidas ni en el CV maestro, ni en el snapshot de candidatura, ni en la redacción determinista del mensaje de candidatura.
+
+4. **Preservación íntegra de la interfaz**:
+   - Se conservan todos los controles, botones de descarga de PDF/DOCX y acciones de revisión y CRM en `backend/app/static/index.html`.
+
+### 2. Evidencias de Verificación Focalizada
+
+- **Nuevas pruebas de integración añadidas en `tests/integration/test_cv_export_and_documents.py`**:
+  * `test_export_candidacy_retains_frozen_snapshot_ignoring_subsequent_profile_changes`: Comprueba que tras aprobar una candidatura, cambiar el teléfono, ciudad y añadir nuevas habilidades al perfil vivo NO afecta la exportación; el documento exportado conserva exactamente los datos congelados del snapshot y no incorpora los cambios posteriores.
+  * `test_export_candidacy_fails_if_file_deleted_after_approval_no_regeneration`: Comprueba que tras eliminar el archivo PDF de disco de una candidatura aprobada, la petición de exportación es rechazada con HTTP 409 Conflict y el archivo no es regenerado silenciosamente.
+  * `test_export_respects_explicit_empty_skills_selection_p2`: Comprueba que `sections={"skills": []}` genera documentos y snapshots sin habilidades, y que al omitir la clave sí se incorporan las verificadas por defecto.
+  * **Resultado del archivo de pruebas**: **8/8 pasadas en 10.07s**.
+- **Suite completa de pruebas**: **164 pruebas pasadas, 24 subpruebas pasadas, 0 fallos** en 59.79s (`PYTHONPATH=. venv/bin/pytest tests/ -q`).
+- **Control de secretos**: 0 secretos detectados (`venv/bin/python scripts/check_secrets.py backend/app scripts`).
+- **Graphify**: Grafo actualizado a **1309 nodos, 2481 aristas y 143 comunidades** (`graphify update .`).
+- **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado.
+
