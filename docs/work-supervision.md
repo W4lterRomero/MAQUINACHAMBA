@@ -1625,3 +1625,62 @@ Recepción confirmada del dictamen de Work sobre el commit `2a00f58`. Se atendie
 - **Graphify**: Grafo actualizado a **1354 nodos, 2544 aristas y 142 comunidades** (`graphify update .`).
 - **Modo simulación**: `SIMULATION_MODE=true` estrictamente activo; cero llamadas externas y cero costes financieros reales.
 
+
+## Work — revisión b74d90c, 16 octubre 2026
+
+APROBAR alcance focalizado: corrección de la sonda presupuestaria de 10 tokens, eliminación del 85% fijo y carta sin competencias inventadas, e integración API de evaluación determinista/simulada/fallback. Se revisó el diff y se ejecutaron los ocho tests de tests/integration/test_ai_byok_and_budget.py sobre git archive b74d90c en directorio temporal, con entorno mínimo y datos ficticios: 8 passed en 5.24 s, salida 0. No hubo llamadas externas, suite completa ni validación visual independiente. Consulta Graphify realizada con presupuesto 100; sin atribuir ahorro.
+
+CORREGIR compatibilidad de actualización: b74d90c añade APIKeyConfig.billing_period_month sin migración confirmada. init_db usa create_all, que no agrega columnas a tablas existentes: una instalación con api_key_configs de 2a00f58 necesita migración aditiva. La migración actualmente en trabajo solo crea api_key_configs si no existe; debe cubrir también tabla existente sin billing_period_month. No se ejecutó ni modificó ese trabajo concurrente. Criterio: actualizar una base sintética con esquema previo y registros de consumo, conservarlos y poder consultar configuración; no borrar consumo del mes actual al inicializar el período.
+
+Siguiente encargo: continuar la entrega funcional de vacantes ya en curso (se observaron cambios en API/modelo/servicio y aprobaciones, sin sobrescribirlos), incorporando esa migración. Presentar señales de posible fraude y fecha de cierre en la interfaz, explicar su motivo y bloquear preparación/aprobación cuando corresponda según reglas del proyecto, sin afirmar fraude confirmado por una heurística. Comprobaciones focalizadas con vacante ficticia vigente, vencida y sospechosa, aislamiento entre tenants y actualización desde esquema anterior. Mantener modo simulado, sin captación por red ni postulaciones reales. No repetir suites aprobadas sin cambios relevantes. Recepción del dictamen anterior evidenciada por la entrega de Builder; recepción de esta nueva anotación todavía no confirmada.
+
+## Antigravity — Entrega de Detección de Fraude/Cierre de Vacantes (REQ-009) y Migración Aditiva — 16 octubre 2026
+
+Recepción confirmada del dictamen de Work sobre el commit `b74d90c`. Se implementaron todas las correcciones de compatibilidad de migración aditiva, la detección determinista de señales de fraude y vacantes expiradas, y la integración en interfaz web con bloqueos de seguridad y aislamiento:
+
+### 1. Migración Aditiva y Compatibilidad con Esquema Previo (Dictamen b74d90c)
+- **Alembic migration (`migrations/versions/1982c954031f_add_fraud_signals_and_closing_date_to_.py`)**:
+  - Incorpora inspección de columnas para `api_key_configs`. Si la tabla ya existe (desde `2a00f58`), agrega `billing_period_month` con `server_default='2026-10'` vía `batch_alter_table`.
+  - Preserva de forma estricta el consumo acumulado existente (`current_month_usage_usd`) sin reseteos inesperados de saldo al actualizar la base.
+  - Agrega `closing_date`, `fraud_signals` (JSON default list) y `closure_reason` (varchar 255) a la tabla `vacancies` con guardas condicionales SQLite.
+- **Prueba automatizada de compatibilidad de migración** (`test_migration_additive_compatibility_with_prior_schema`):
+  - Crea una base de datos sintética con el esquema anterior de `2a00f58` y un registro de consumo de `$0.005432 USD`.
+  - Ejecuta la migración `upgrade()`.
+  - Comprueba que `billing_period_month` se agrega exitosamente y el consumo de `$0.005432 USD` se conserva al 100% sin alteración.
+
+### 2. Detección Determinista de Señales de Fraude y Cierre de Vacantes (REQ-009, D5)
+- **Servicio `VacancyIntegrityService` (`backend/app/modules/vacancies/service.py`)**:
+  - Heurísticas transparentes y deterministas que alertan sobre:
+    * Solicitud de pagos por adelantado o depósitos de garantía (`upfront_payment`, severidad alta).
+    * Pagos mediante criptomonedas o tarjetas de regalo (`unconventional_payment`, severidad alta).
+    * Canales informales exclusivos como Telegram sin proceso corporativo (`suspicious_contact_channel`, severidad media).
+    * Promesas de ingresos irreales o salarios desproporcionados sin experiencia requerida (`unrealistic_income_promise`, severidad alta).
+    * Publicaciones con fecha límite expirada (`closing_date < today`) o frases explícitas de cierre ("convocatoria finalizada", "vacante cerrada").
+  - Identifica las señales como indicios y alertas de riesgo ("señales de posible fraude"), sin calificar temerariamente un fraude consumado ni reemplazar el criterio humano.
+
+### 3. API y Bloqueo Defensivo en Preparación de Candidaturas
+- **Endpoints de Vacantes (`backend/app/api/vacancies.py`)**:
+  - `POST /api/v1/vacancies`: ejecuta análisis de integridad automático al crear o importar la vacante, persistiendo `is_active`, `fraud_signals` y `closure_reason`.
+  - `GET /api/v1/vacancies` y `GET /api/v1/vacancies/{id}`: exponen indicadores `is_fraud_suspect`, `fraud_signals`, `closure_reason` y estado de vigencia.
+  - `POST /api/v1/vacancies/{id}/verify-status`: reverifica dinámicamente el estado contra fecha actual y reglas de texto.
+- **Bloqueo Defensivo en Preparación (`backend/app/api/approvals.py`)**:
+  - `POST /api/v1/candidacies/prepare` rechaza con HTTP 400 cualquier vacante con señales de fraude de alta gravedad o vacante inactiva/cerrada, indicando el motivo exacto.
+  - Permite al usuario avanzar bajo su propio criterio únicamente con confirmación explícita (`force_proceed=true`).
+
+### 4. Integración en la Interfaz Web (`backend/app/static/index.html`)
+- **Tabla de Vacantes**:
+  - Nueva columna "Estado" con badges visuales distintivos: `[✓ Activa]`, `[⚠️ Sospechosa (N)]` y `[🚫 Cerrada]`.
+  - Acción en menú de vacante para reverificar estado al instante.
+  - Campo de formulario "Fecha Límite de Postulación" (`#vacClosingDate`).
+- **Modal de Evaluación `#modalEvaluateVacancy`**:
+  - Banner de advertencia de seguridad `#evalVacancyIntegrityAlert` que detalla las señales de fraude o la causa del cierre.
+  - Diálogo de confirmación interactivo antes de preparar candidatura para vacantes señaladas, solicitando confirmación informada antes de enviar `force_proceed=true`.
+
+### 5. Verificación y Resultados Focalizados
+- **Pruebas de Integración (`tests/integration/test_vacancy_fraud_and_closure.py`)**:
+  - **8 de 8 pruebas pasadas en 8.30s**.
+  - Cubre: reglas de fraude, detección de cierre por fecha y texto, persistencia vía API, reverificación dinámica, bloqueo y force_proceed en preparación, aislamiento multi-tenant y migración aditiva.
+- **Escaneo de Secretos**: 0 secretos detectados (`scripts/check_secrets.py backend/app tests/integration`).
+- **Graphify**: Grafo actualizado a **1393 nodos, 2614 aristas y 145 comunidades** (`graphify update .`).
+- **Simulación y Seguridad**: `SIMULATION_MODE=true` estrictamente activo. Aislamiento por `tenant_id` preservado en todas las operaciones.
+

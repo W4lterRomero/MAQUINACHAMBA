@@ -31,7 +31,10 @@ class Vacancy(Base):
     requirements: Mapped[dict] = mapped_column(JSON, default=list)  # lista de requerimientos
     description: Mapped[str] = mapped_column(Text, default="")
     posted_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    closing_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    fraud_signals: Mapped[dict] = mapped_column(JSON, default=list)
+    closure_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     dedup_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     last_verified_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

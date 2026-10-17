@@ -12,18 +12,18 @@
 | ID | Requisito | Decisión | Fase | Prioridad | Estado | Prueba |
 |----|-----------|----------|:----:|:---------:|:------:|--------|
 | REQ-001 | Perfil profesional configurable sin editar código | D7, D12 | 1 | P1 | ✅ | `api/profile.py`, `test_api_v1_endpoints.py::test_profile_and_cv_api_flow` |
-| REQ-002 | Importar CV en PDF/DOCX con revisión humana | D12 | 2 | P1 | ⬜ | T-002 |
+| REQ-002 | Importar CV en PDF/DOCX con revisión humana | D12 | 2 | P1 | ✅ | `test_cv_import_and_verification.py`, `test_cv_import_and_review_ui.py` |
 | REQ-003 | Importar GitHub con autorización y permisos mínimos | D12 | 2 | P1 | ⬜ | T-003 |
 | REQ-004 | Varios CV maestros especializados | D9 | 2 | P1 | ✅ | `api/profile.py`, `cv/models.py`, `test_api_v1_endpoints.py` |
-| REQ-005 | Consistencia entre CV maestros y perfil | D9 | 2 | P1 | ⬜ | T-005 |
-| REQ-006 | Perfil de comunicación con cuestionario | D10 | 2 | P1 | ⬜ | T-006 |
+| REQ-005 | Consistencia entre CV maestros y perfil | D9 | 2 | P1 | ✅ | `test_cv_import_and_review_ui.py`, `api/cv.py` |
+| REQ-006 | Perfil de comunicación con cuestionario | D10 | 2 | P1 | ✅ | `test_communication_profile.py`, `api/communication.py` |
 | REQ-007 | Descubrir e importar vacantes | D5 | 1 | P1 | ✅ | `api/vacancies.py`, `test_api_v1_endpoints.py` |
 | REQ-008 | Deduplicación de vacantes | D5 | 1 | P1 | ✅ | `api/vacancies.py`, `test_api_v1_endpoints.py` |
-| REQ-009 | Detección de vacantes cerradas y fraude | D5 | 1 | P2 | ⬜ | T-009 |
+| REQ-009 | Detección de vacantes cerradas y fraude | D5 | 1 | P2 | ✅ | `test_vacancy_fraud_and_closure.py`, `vacancies/service.py` |
 | REQ-010 | Evaluar compatibilidad con justificación | D5 | 1 | P1 | ✅ | `api/evaluations.py`, `test_api_v1_endpoints.py` |
 | REQ-011 | Reglas deterministas antes de IA | D14 | 1 | P1 | ✅ | `evaluation/service.py`, `api/evaluations.py` |
-| REQ-012 | Adaptar CV sin inventar hechos | D9,D12 | 2 | P1 | ⬜ | T-012 |
-| REQ-013 | Generar documentos PDF/DOCX | D9 | 2 | P1 | ⬜ | T-013 |
+| REQ-012 | Adaptar CV sin inventar hechos | D9,D12 | 2 | P1 | ✅ | `test_communication_profile.py`, `test_cv_export_and_documents.py` |
+| REQ-013 | Generar documentos PDF/DOCX | D9 | 2 | P1 | ✅ | `cv/generator.py`, `test_cv_export_and_documents.py` |
 | REQ-014 | Revisar vacante, CV y mensaje antes de aprobar | D11 | 1 | P0 | ✅ | `api/approvals.py::get_candidacy_for_review`, `test_api_v1_endpoints.py` |
 | REQ-015 | Aprobar hoy, ejecutar mañana | D3 | 1 | P0 | ✅ | `api/approvals.py::approve_candidacy`, `scheduling/service.py` |
 | REQ-016 | Sin envíos durante preparación | D3 | 1 | P0 | ✅ | `api/approvals.py::prepare_candidacy`, `test_api_v1_endpoints.py` |
@@ -39,7 +39,7 @@
 | REQ-026 | CRM con tabla, Kanban y detalle | D8 | 1 | P1 | ✅ | `api/crm.py`, `CRMEntry`, `CRMEvent`, `test_api_v1_endpoints.py` |
 | REQ-027 | Seguimientos con aprobación | D4 | 4 | P1 | ✅ | `test_security.py::test_follow_up_requires_approval` |
 | REQ-028 | Reporte por correo y dashboard | D8 | 4 | P1 | ⬜ | T-028 |
-| REQ-029 | BYOK con presupuesto | D14 | 2 | P0 | ⬜ | T-029 |
+| REQ-029 | BYOK con presupuesto | D14 | 2 | P0 | ✅ | `test_ai_byok_and_budget.py`, `secrets/ai_service.py` |
 | REQ-030 | Horarios y zona horaria configurables | D13 | 1 | P1 | ✅ | `core/clock.py`, `scheduling/service.py` |
 | REQ-031 | Operación con IDE cerrado | D8 | 1 | P0 | ✅ | `api/execution.py`, `worker.py` ejecutable como proceso background |
 | REQ-032 | Instalación reproducible | D1 | 5 | P1 | ⬜ | T-032 |

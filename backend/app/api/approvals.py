@@ -25,6 +25,7 @@ class PrepareCandidacyRequest(BaseModel):
     cv_id: Optional[str] = None
     evaluation_id: Optional[str] = None
     cover_letter: Optional[str] = None
+    force_proceed: Optional[bool] = False
 
 
 class ApproveCandidacyRequest(BaseModel):
@@ -50,11 +51,15 @@ async def prepare_candidacy(
     """
     REQ-016: Prepara el paquete de candidatura para revisión humana.
     ESTRICTAMENTE NINGÚN ENVÍO durante esta fase.
+    REQ-009: Bloquea candidaturas sobre vacantes cerradas o con fraude sospechoso
+    salvo confirmación explícita (force_proceed=True).
     """
     p_res = await session.execute(
-        select(UserProfile).where(UserProfile.tenant_id == tenant_id)
+        select(UserProfile)
+        .where(UserProfile.tenant_id == tenant_id)
+        .order_by(UserProfile.created_at.desc())
     )
-    profile = p_res.scalar_one_or_none()
+    profile = p_res.scalars().first()
     if not profile:
         raise HTTPException(status_code=404, detail="Perfil no configurado.")
 
@@ -64,6 +69,15 @@ async def prepare_candidacy(
     vacancy = v_res.scalar_one_or_none()
     if not vacancy:
         raise HTTPException(status_code=404, detail="Vacante no encontrada.")
+
+    # Protección contra fraude y vacantes expiradas (REQ-009)
+    is_fraud_suspect = any(s.get("severity") == "high" for s in (vacancy.fraud_signals or []))
+    if (is_fraud_suspect or not vacancy.is_active) and not payload.force_proceed:
+        reason_str = vacancy.closure_reason or "Señales de fraude de alta gravedad detectadas."
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Postulación bloqueada por seguridad: la vacante está cerrada o presenta indicios de fraude ({reason_str}). Para proceder bajo su propio criterio, active force_proceed=true.",
+        )
 
     if payload.cv_id:
         c_res = await session.execute(

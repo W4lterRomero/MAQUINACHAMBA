@@ -587,6 +587,10 @@
               <label>Descripción</label>
               <textarea id="vacDesc" placeholder="Detalles de la posición..."></textarea>
             </div>
+            <div class="form-group">
+              <label>Fecha de Cierre (Opcional)</label>
+              <input type="date" id="vacClosingDate">
+            </div>
             <button type="submit" class="btn btn-primary">Registrar Vacante</button>
           </form>
         </div>
@@ -597,13 +601,14 @@
             <thead>
               <tr>
                 <th>Puesto / Empresa</th>
+                <th>Estado</th>
                 <th>URL Origen</th>
                 <th>Requisitos</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Sin vacantes importadas.</td></tr>
+              <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Sin vacantes importadas.</td></tr>
             </tbody>
           </table>
         </div>
@@ -1035,6 +1040,11 @@
         <input type="hidden" id="evalCurrentVacancyId" value="">
         <div style="font-size: 0.9rem; margin-bottom: 0.25rem;"><strong id="lblEvalCompany">Empresa</strong> — <span id="lblEvalJobTitle" style="color: var(--primary); font-weight: 600;">Puesto</span></div>
         <div style="font-size: 0.8rem; color: var(--text-muted);" id="lblEvalReqs">Requisitos: -</div>
+      </div>
+
+      <!-- Alerta de Seguridad de Integridad / Fraude / Vacante Cerrada (REQ-009) -->
+      <div id="evalVacancyIntegrityAlert" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 0.375rem; padding: 0.6rem 0.8rem; margin-bottom: 1rem; font-size: 0.82rem; color: #fca5a5;">
+        <strong>⚠️ Advertencia de Seguridad:</strong> <span id="lblEvalVacancyIntegrityDetails"></span>
       </div>
 
       <!-- Configuración de Evaluación -->
@@ -1948,16 +1958,26 @@
     async function importVacancy(e) {
       e.preventDefault();
       const reqs = document.getElementById("vacReqs").value.split(",").map(r => r.trim()).filter(Boolean);
+      const closingDateVal = document.getElementById("vacClosingDate").value;
       const payload = {
         company_name: document.getElementById("vacCompany").value,
         job_title: document.getElementById("vacTitle").value,
         source_url: document.getElementById("vacUrl").value,
         requirements: reqs,
         description: document.getElementById("vacDesc").value,
+        closing_date: closingDateVal || null,
       };
       const res = await apiRequest("/api/v1/vacancies", { method: "POST", body: JSON.stringify(payload) });
       if (res) {
-        showToast(res.status === "already_exists" ? "Vacante ya existía (deduplicada por hash)." : "Vacante importada con éxito.");
+        if (res.is_fraud_suspect) {
+          showToast("⚠️ Vacante registrada con advertencia: posibles indicios de fraude detectados.", true);
+        } else if (res.is_closed) {
+          showToast("🚫 Vacante registrada pero clasificada como cerrada o expirada.", true);
+        } else if (res.status === "already_exists") {
+          showToast("Vacante ya existía (deduplicada por hash).");
+        } else {
+          showToast("Vacante importada con éxito.");
+        }
         loadVacancies();
       }
     }
@@ -1967,19 +1987,52 @@
       const vacancies = await apiRequest("/api/v1/vacancies");
       const tb = document.querySelector("#tblVacancies tbody");
       if (!vacancies || vacancies.length === 0) {
-        tb.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Sin vacantes registradas.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Sin vacantes registradas.</td></tr>';
         return;
       }
-      tb.innerHTML = vacancies.map(v => `
-        <tr>
-          <td><strong>${v.job_title}</strong><br><span style="color: var(--text-muted);">${v.company_name}</span></td>
-          <td><a href="${v.source_url}" target="_blank" style="color: var(--primary); font-size: 0.8rem;">${v.source_url.substring(0, 35)}...</a></td>
-          <td>${(v.requirements || []).join(", ") || "-"}</td>
-          <td>
-            <button class="btn btn-outline btn-sm" onclick="evaluateAndPrepare('${v.id}')">Evaluar y Revisar</button>
-          </td>
-        </tr>
-      `).join("");
+      tb.innerHTML = vacancies.map(v => {
+        let statusBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">✓ Activa</span>`;
+        if (v.is_fraud_suspect) {
+          const titles = (v.fraud_signals || []).map(s => escapeHtml(s.title)).join(" | ");
+          statusBadge = `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #ef4444;" title="${titles}">⚠️ Sospechosa (${v.fraud_signals.length})</span>`;
+        } else if (v.is_active === false) {
+          statusBadge = `<span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8;" title="${escapeHtml(v.closure_reason || 'Cerrada')}">🚫 Cerrada</span>`;
+        }
+
+        return `
+          <tr>
+            <td><strong>${escapeHtml(v.job_title)}</strong><br><span style="color: var(--text-muted);">${escapeHtml(v.company_name)}</span></td>
+            <td>${statusBadge}</td>
+            <td><a href="${escapeHtml(v.source_url)}" target="_blank" style="color: var(--primary); font-size: 0.8rem;">${escapeHtml(v.source_url.substring(0, 30))}...</a></td>
+            <td>${(v.requirements || []).map(escapeHtml).join(", ") || "-"}</td>
+            <td>
+              <div style="display: flex; gap: 0.3rem;">
+                <button class="btn btn-outline btn-sm" onclick="evaluateAndPrepare('${v.id}')">⚡ Evaluar</button>
+                <button class="btn btn-outline btn-sm" onclick="reverifyVacancyStatus('${v.id}')" title="Re-verificar integridad y fraude">🔍</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function reverifyVacancyStatus(vacancyId) {
+      if (!authToken) return;
+      try {
+        const res = await apiRequest(`/api/v1/vacancies/${vacancyId}/verify-status`, { method: "POST" });
+        if (res) {
+          if (res.is_fraud_suspect) {
+            showToast("⚠️ Verificación: Se detectaron señales de fraude laboral.", true);
+          } else if (res.is_closed) {
+            showToast(`🚫 Verificación: Vacante cerrada (${res.closure_reason || ''}).`, true);
+          } else {
+            showToast("✓ Verificación: Vacante activa y sin señales de fraude.");
+          }
+          loadVacancies();
+        }
+      } catch (err) {
+        showToast("Error al verificar estado: " + err.message, true);
+      }
     }
 
     let currentEvalVacancy = null;
@@ -1999,6 +2052,24 @@
         document.getElementById("lblEvalCompany").innerText = currentEvalVacancy.company_name;
         document.getElementById("lblEvalJobTitle").innerText = currentEvalVacancy.job_title;
         document.getElementById("lblEvalReqs").innerText = "Requisitos: " + (currentEvalVacancy.requirements && currentEvalVacancy.requirements.length > 0 ? currentEvalVacancy.requirements.join(", ") : "Sin requisitos explícitos");
+
+        // Alerta de integridad / fraude / vacante cerrada (REQ-009)
+        const alertBox = document.getElementById("evalVacancyIntegrityAlert");
+        const alertDetails = document.getElementById("lblEvalVacancyIntegrityDetails");
+        let warnings = [];
+        if (currentEvalVacancy.is_fraud_suspect) {
+          const sigDetails = (currentEvalVacancy.fraud_signals || []).map(s => s.title || s.matched_text).join("; ");
+          warnings.push(`Señales de fraude detectadas: ${sigDetails || "Patrón de riesgo laboral/financiero"}`);
+        }
+        if (currentEvalVacancy.is_active === false) {
+          warnings.push(`Vacante inactiva / cerrada: ${currentEvalVacancy.closure_reason || "Convocatoria finalizada o fecha expirada"}`);
+        }
+        if (warnings.length > 0) {
+          alertDetails.innerText = warnings.join(" | ");
+          alertBox.style.display = "block";
+        } else {
+          alertBox.style.display = "none";
+        }
 
         // Cargar CVs maestros disponibles
         const prof = await apiRequest("/api/v1/profile");
@@ -2139,11 +2210,27 @@
       const vacancyId = document.getElementById("evalCurrentVacancyId").value;
       const cvId = document.getElementById("selEvalMasterCv").value;
 
+      let forceProceed = false;
+      if (currentEvalVacancy && (currentEvalVacancy.is_fraud_suspect || currentEvalVacancy.is_active === false)) {
+        const warnMsg = currentEvalVacancy.is_fraud_suspect
+          ? "Esta vacante presenta SEÑALES DE FRAUDE O RIESGO (" + ((currentEvalVacancy.fraud_signals || []).map(s => s.title).join(", ") || "patrón de riesgo") + "). ¿Deseas forzar la preparación bajo tu propia responsabilidad?"
+          : "Esta vacante figura como CERRADA o inactiva (" + (currentEvalVacancy.closure_reason || "convocatoria finalizada") + "). ¿Deseas forzar la preparación de la candidatura?";
+        if (!confirm(warnMsg)) {
+          return;
+        }
+        forceProceed = true;
+      }
+
       try {
         showToast("Preparando paquete de postulación...");
         const cand = await apiRequest("/api/v1/candidacies/prepare", {
           method: "POST",
-          body: JSON.stringify({ vacancy_id: vacancyId, cv_id: cvId, evaluation_id: currentLastEvaluation.id })
+          body: JSON.stringify({
+            vacancy_id: vacancyId,
+            cv_id: cvId,
+            evaluation_id: currentLastEvaluation.id,
+            force_proceed: forceProceed
+          })
         });
 
         closeEvaluateVacancyModal();
