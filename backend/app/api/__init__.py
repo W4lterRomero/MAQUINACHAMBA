@@ -12,6 +12,7 @@ from backend.app.api.approvals import router as approvals_router
 from backend.app.api.crm import router as crm_router
 from backend.app.api.execution import router as execution_router
 from backend.app.api.communication import router as communication_router
+from backend.app.api.ai_config import router as ai_router
 
 api_router = APIRouter()
 
@@ -23,4 +24,5 @@ api_router.include_router(approvals_router)
 api_router.include_router(crm_router)
 api_router.include_router(execution_router)
 api_router.include_router(communication_router)
+api_router.include_router(ai_router)
 

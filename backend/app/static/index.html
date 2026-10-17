@@ -172,6 +172,7 @@
     <button data-tab="tab-approvals" id="nav-tab-approvals" onclick="switchTab('tab-approvals')">Revisión y Aprobaciones</button>
     <button data-tab="tab-crm" id="nav-tab-crm" onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
     <button data-tab="tab-execution" id="nav-tab-execution" onclick="switchTab('tab-execution')">Cola de Ejecución</button>
+    <button data-tab="tab-ai-config" id="nav-tab-ai-config" onclick="switchTab('tab-ai-config')">Configuración IA (BYOK)</button>
   </nav>
 
   <main>
@@ -702,6 +703,192 @@
         </table>
       </div>
     </section>
+
+    <!-- TAB 9: CONFIGURACIÓN DE IA Y CONTROL DE PRESUPUESTO (BYOK) -->
+    <section id="tab-ai-config" class="tab-content">
+      <!-- Banner de Simulación Obligatorio -->
+      <div class="card" style="border-left: 4px solid var(--accent); background: rgba(59, 130, 246, 0.08); margin-bottom: 1.5rem;">
+        <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+          <span style="font-size: 1.5rem;">ℹ️</span>
+          <div>
+            <h3 style="margin: 0 0 0.25rem 0; color: var(--accent); font-size: 1rem;">Modo Simulación Activo — Sin Costos Financieros</h3>
+            <p style="margin: 0; font-size: 0.85rem; color: var(--text-muted);" id="aiSimBannerText">
+              Los tokens consumidos y costos reportados son estimaciones locales para control presupuestario y pruebas. No se realizan llamadas externas a proveedores de IA ni se incurre en facturación financiera real.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tarjetas de Presupuesto y Alertas -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Presupuesto Mensual</div>
+          <div style="font-size: 1.6rem; font-weight: 700; color: var(--text); margin: 0.25rem 0;" id="aiBudgetLimitDisplay">$10.00 USD</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">Límite mensual configurable</div>
+        </div>
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Consumo Acumulado</div>
+          <div style="font-size: 1.6rem; font-weight: 700; color: var(--accent); margin: 0.25rem 0;" id="aiBudgetUsageDisplay">$0.0000 USD</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">Estimación local acumulada</div>
+        </div>
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Saldo Restante</div>
+          <div style="font-size: 1.6rem; font-weight: 700; color: #10b981; margin: 0.25rem 0;" id="aiBudgetRemainingDisplay">$10.0000 USD</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);" id="aiBudgetReservedSub">En vuelo: $0.0000</div>
+        </div>
+        <div class="card" style="margin-bottom: 0;" id="aiBudgetStatusCard">
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Estado del Presupuesto</div>
+          <div style="font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0;" id="aiBudgetStatusBadge">
+            <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">✓ Disponible</span>
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);" id="aiBudgetStatusText">Operación de IA autorizada</div>
+        </div>
+      </div>
+
+      <!-- Alerta de Bloqueo por Presupuesto Agotado (dinámica) -->
+      <div id="aiBudgetExhaustedAlert" class="card" style="display: none; border-left: 4px solid #ef4444; background: rgba(239, 68, 68, 0.1); margin-bottom: 1.5rem;">
+        <h3 style="margin: 0 0 0.25rem 0; color: #ef4444; font-size: 1rem;">⚠️ Presupuesto Mensual Agotado</h3>
+        <p style="margin: 0; font-size: 0.85rem; color: var(--text);">
+          Se ha alcanzado el límite presupuestario asignado. Todas las tareas siguientes emplearán automáticamente la <strong>alternativa determinista basada en reglas</strong> sin incurrir en consumo de tokens.
+        </p>
+      </div>
+
+      <!-- Configuración del Proveedor y Modelo (BYOK) -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+        <!-- Columna 1: Proveedor y Modelo -->
+        <div class="card" style="margin-bottom: 0;">
+          <h2 style="margin-bottom: 1rem;">Selección de Proveedor y Modelo (BYOK)</h2>
+          <form onsubmit="handleSaveAIConfig(event)">
+            <div class="form-group">
+              <label>Proveedor de IA</label>
+              <select id="selAIProvider" onchange="onAIProviderChanged()">
+                <option value="openai">OpenAI (GPT-4o, GPT-4o mini)</option>
+                <option value="anthropic">Anthropic (Claude 3.5 Sonnet, Claude 3 Haiku)</option>
+                <option value="google">Google Gemini (Gemini 1.5 Flash, Gemini 1.5 Pro)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Modelo Específico</label>
+              <select id="selAIModel">
+                <!-- Se llena dinámicamente con precios -->
+              </select>
+              <small style="color: var(--text-muted); display: block; margin-top: 0.25rem;" id="lblModelPricingNotes"></small>
+            </div>
+            <div class="form-group">
+              <label>Presupuesto Mensual Máximo (USD)</label>
+              <input type="number" id="numAIMonthlyBudget" step="0.5" min="0" max="1000" value="10.00" required>
+            </div>
+            <div class="form-group">
+              <label>Máximo de Tokens por Petición</label>
+              <input type="number" id="numAIMaxTokens" step="256" min="256" max="16384" value="4096">
+            </div>
+            <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem;">
+              <input type="checkbox" id="chkAIActive" checked style="width: auto;">
+              <label for="chkAIActive" style="margin-bottom: 0; cursor: pointer;">Habilitar uso de IA (si se desmarca, se aplica alternativa determinista)</label>
+            </div>
+            <div style="margin-top: 1.25rem;">
+              <button type="submit" class="btn btn-primary btn-sm" id="btnSaveAIConfig">Guardar Configuración</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Columna 2: Almacén Seguro de Claves (0600 Vault) -->
+        <div class="card" style="margin-bottom: 0;">
+          <h2 style="margin-bottom: 0.5rem;">Gestión Segura de API Key (Vault Cifrado)</h2>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Tus claves se cifran localmente con <strong>AES-256-GCM</strong> y permisos estrictos <strong>POSIX 0600</strong> en el disco de tu máquina. Nunca se guardan en la base de datos, logs o en el navegador.
+          </p>
+          <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 0.375rem; padding: 0.75rem; margin-bottom: 1rem;">
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Estado Actual para <span id="lblCurrentProviderName" style="color: var(--text); font-weight: 600;">OpenAI</span>:</div>
+            <div style="font-size: 1rem; font-weight: 600; margin-top: 0.25rem;" id="lblCurrentKeyStatus">
+              <span style="color: #94a3b8;">Sin clave configurada</span>
+            </div>
+          </div>
+
+          <form onsubmit="handleSaveAIKey(event)">
+            <div class="form-group">
+              <label>Nueva API Key / Reemplazo Seguro</label>
+              <input type="password" id="txtAISecretKey" placeholder="Ingresa tu clave de API (ej. sk-...)" autocomplete="off">
+              <small style="color: var(--text-muted); display: block; margin-top: 0.25rem;">
+                La clave ingresada se cifra inmediatamente en el vault local y el campo se limpia tras guardar.
+              </small>
+            </div>
+            <div style="display: flex; gap: 0.75rem; margin-top: 1rem;">
+              <button type="submit" class="btn btn-primary btn-sm" id="btnSaveAIKey">Guardar / Cifrar Clave</button>
+              <button type="button" class="btn btn-danger btn-sm" id="btnDeleteAIKey" onclick="handleDeleteAIKey()" style="display: none;">Eliminar Clave</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Simulación de Llamadas y Comprobación de Fallback Determinista -->
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <h2>Prueba de Llamada y Verificación de Presupuesto</h2>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Prueba el flujo de reserva presupuestaria, deducción de tokens simulados y verificación del fallback determinista sin realizar llamadas reales a APIs externas.
+        </p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div>
+            <div class="form-group">
+              <label>Operación a Simular</label>
+              <select id="selSimOperation">
+                <option value="evaluation">Evaluación de Compatibilidad (Profile vs Vacancy)</option>
+                <option value="cover_letter">Generación de Carta / Mensaje de Postulación</option>
+                <option value="cv_adaptation">Adaptación de CV Maestro</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Prompt o Texto de Entrada</label>
+              <textarea id="txtSimPrompt" rows="3" placeholder="Ingresa texto descriptivo para evaluar consumo de tokens...">Desarrollador Full Stack con 4 años de experiencia en Python, FastAPI y bases de datos relacionales.</textarea>
+            </div>
+            <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
+              <input type="checkbox" id="chkForceFallback" style="width: auto;">
+              <label for="chkForceFallback" style="margin-bottom: 0; cursor: pointer;">Forzar alternativa determinista (simular IA desactivada)</label>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="handleRunSimulateCall()" id="btnRunSimulateCall">
+              Ejecutar Llamada Simulada
+            </button>
+          </div>
+
+          <div>
+            <label style="font-weight: 600; font-size: 0.85rem; margin-bottom: 0.5rem; display: block;">Resultado de la Ejecución</label>
+            <div id="aiSimResultContainer" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--card-border); border-radius: 0.375rem; padding: 0.75rem; min-height: 140px; font-size: 0.85rem;">
+              <span style="color: var(--text-muted);">Ejecuta una llamada de prueba para ver el desglose de tokens consumidos, costo calculado y alternativa ejecutada.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Registro de Consumo Simulado (Cost Logs) -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <div>
+            <h2 style="margin: 0 0 0.25rem 0;">Registro Histórico de Consumo (Cost Logs)</h2>
+            <p style="margin: 0; font-size: 0.85rem; color: var(--text-muted);">
+              Auditoría local de operaciones simuladas y estimaciones de consumo por tenant.
+            </p>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="loadAICostLogs()">Actualizar Historial</button>
+        </div>
+        <table id="tblAICostLogs">
+          <thead>
+            <tr>
+              <th>Fecha / Hora (UTC)</th>
+              <th>Proveedor</th>
+              <th>Modelo</th>
+              <th>Operación</th>
+              <th>Tokens In</th>
+              <th>Tokens Out</th>
+              <th>Costo Estimado</th>
+              <th>Modo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Sin consumos registrados.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <!-- MODAL DE AUTENTICACIÓN -->
@@ -911,6 +1098,7 @@
       if (tabId === "tab-master-cvs") { loadMasterCVsList(); loadVerifiedSkillsForForm(); }
       if (tabId === "tab-communication") loadCommunicationData();
       if (tabId === "tab-profile") loadProfileData();
+      if (tabId === "tab-ai-config") loadAIConfig();
     }
 
     function toggleAuthModal(show = null) {
@@ -2134,6 +2322,312 @@
       }
     }
 
+    // ==========================================
+    // SECCIÓN: CONFIGURACIÓN DE IA (BYOK) Y COSTOS
+    // ==========================================
+    let aiCatalogData = null;
+    let currentAIConfig = null;
+
+    async function loadAICatalog() {
+      try {
+        const res = await fetch("/api/v1/ai/catalog", { credentials: "include" });
+        if (res.ok) {
+          aiCatalogData = await res.json();
+          renderAIModelOptions();
+        }
+      } catch (e) {
+        console.error("Error al cargar catálogo de IA:", e);
+      }
+    }
+
+    function renderAIModelOptions() {
+      if (!aiCatalogData || !aiCatalogData.providers) return;
+      const provSelect = document.getElementById("selAIProvider");
+      const modelSelect = document.getElementById("selAIModel");
+      const notes = document.getElementById("lblModelPricingNotes");
+      const selectedProv = provSelect.value;
+      const provInfo = aiCatalogData.providers[selectedProv];
+
+      document.getElementById("lblCurrentProviderName").innerText = provInfo ? provInfo.name : selectedProv;
+
+      if (!provInfo || !provInfo.models) {
+        modelSelect.innerHTML = "";
+        notes.innerText = "";
+        return;
+      }
+
+      modelSelect.innerHTML = Object.entries(provInfo.models).map(([key, m]) => {
+        return `<option value="${key}">${escapeHtml(m.name)} (In: $${m.input_cost_per_million} / Out: $${m.output_cost_per_million} por 1M tokens)</option>`;
+      }).join("");
+
+      if (currentAIConfig && currentAIConfig.model && provInfo.models[currentAIConfig.model]) {
+        modelSelect.value = currentAIConfig.model;
+      }
+      updateModelPricingNotes();
+    }
+
+    function updateModelPricingNotes() {
+      if (!aiCatalogData || !aiCatalogData.providers) return;
+      const provSelect = document.getElementById("selAIProvider");
+      const modelSelect = document.getElementById("selAIModel");
+      const notes = document.getElementById("lblModelPricingNotes");
+      const prov = provSelect.value;
+      const mod = modelSelect.value;
+      const m = aiCatalogData.providers[prov]?.models?.[mod];
+      if (m) {
+        notes.innerText = `${m.description} Contexto máx: ${m.max_context_tokens.toLocaleString()} tokens.`;
+      } else {
+        notes.innerText = "";
+      }
+    }
+
+    function onAIProviderChanged() {
+      renderAIModelOptions();
+      loadAIConfig();
+    }
+
+    async function loadAIConfig() {
+      if (!authToken) return;
+      const provSelect = document.getElementById("selAIProvider");
+      const prov = provSelect ? provSelect.value : "openai";
+
+      if (!aiCatalogData) {
+        await loadAICatalog();
+      }
+
+      try {
+        const res = await apiFetch(`/api/v1/ai/config?provider=${encodeURIComponent(prov)}`);
+        if (!res.ok) return;
+        const cfg = await res.json();
+        currentAIConfig = cfg;
+
+        // Banner
+        if (cfg.simulation_banner) {
+          document.getElementById("aiSimBannerText").innerText = cfg.simulation_banner;
+        }
+
+        // Budget displays
+        document.getElementById("aiBudgetLimitDisplay").innerText = `$${Number(cfg.monthly_budget_usd).toFixed(2)} USD`;
+        document.getElementById("aiBudgetUsageDisplay").innerText = `$${Number(cfg.current_month_usage_usd).toFixed(4)} USD`;
+        document.getElementById("aiBudgetRemainingDisplay").innerText = `$${Number(cfg.remaining_budget_usd).toFixed(4)} USD`;
+        document.getElementById("aiBudgetReservedSub").innerText = `En vuelo: $${Number(cfg.reserved_budget_usd).toFixed(4)}`;
+
+        // Form fields
+        document.getElementById("numAIMonthlyBudget").value = Number(cfg.monthly_budget_usd).toFixed(2);
+        document.getElementById("numAIMaxTokens").value = cfg.max_tokens_per_request || 4096;
+        document.getElementById("chkAIActive").checked = cfg.is_active;
+
+        if (cfg.model) {
+          const modelSelect = document.getElementById("selAIModel");
+          if (modelSelect) modelSelect.value = cfg.model;
+          updateModelPricingNotes();
+        }
+
+        // Status badge and alert
+        const badge = document.getElementById("aiBudgetStatusBadge");
+        const statusText = document.getElementById("aiBudgetStatusText");
+        const exhaustedAlert = document.getElementById("aiBudgetExhaustedAlert");
+
+        if (cfg.budget_status === "exhausted") {
+          badge.innerHTML = `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #ef4444;">⛔ Presupuesto Agotado</span>`;
+          statusText.innerText = "Alternativa determinista activa obligatoria";
+          exhaustedAlert.style.display = "block";
+        } else if (cfg.budget_status === "warning") {
+          badge.innerHTML = `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b;">⚠️ Alerta (≥80% consumido)</span>`;
+          statusText.innerText = "Queda menos del 20% del presupuesto";
+          exhaustedAlert.style.display = "none";
+        } else {
+          badge.innerHTML = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">✓ Disponible</span>`;
+          statusText.innerText = cfg.is_active ? "Operación de IA autorizada" : "IA pausada por usuario";
+          exhaustedAlert.style.display = "none";
+        }
+
+        // Key status
+        const keyStatusEl = document.getElementById("lblCurrentKeyStatus");
+        const btnDeleteKey = document.getElementById("btnDeleteAIKey");
+        if (cfg.has_key && cfg.key_preview) {
+          keyStatusEl.innerHTML = `<span style="color: #10b981;">✓ Clave en Vault: <code>${escapeHtml(cfg.key_preview)}</code> (permisos 0600)</span>`;
+          btnDeleteKey.style.display = "inline-block";
+        } else {
+          keyStatusEl.innerHTML = `<span style="color: #94a3b8;">Sin clave configurada en el vault local</span>`;
+          btnDeleteKey.style.display = "none";
+        }
+
+        await loadAICostLogs();
+      } catch (err) {
+        console.error("Error al cargar config de IA:", err);
+      }
+    }
+
+    async function handleSaveAIConfig(e) {
+      e.preventDefault();
+      const prov = document.getElementById("selAIProvider").value;
+      const model = document.getElementById("selAIModel").value;
+      const budget = parseFloat(document.getElementById("numAIMonthlyBudget").value);
+      const maxTokens = parseInt(document.getElementById("numAIMaxTokens").value, 10);
+      const isActive = document.getElementById("chkAIActive").checked;
+
+      try {
+        const res = await apiFetch("/api/v1/ai/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: prov,
+            model: model,
+            monthly_budget_usd: budget,
+            max_tokens_per_request: maxTokens,
+            is_active: isActive,
+          }),
+        });
+        if (res.ok) {
+          alert("Configuración de IA guardada con éxito.");
+          await loadAIConfig();
+        } else {
+          const err = await res.json();
+          alert("Error al guardar: " + (err.detail || "Error desconocido"));
+        }
+      } catch (err) {
+        alert("Error de red: " + err.message);
+      }
+    }
+
+    async function handleSaveAIKey(e) {
+      e.preventDefault();
+      const prov = document.getElementById("selAIProvider").value;
+      const keyVal = document.getElementById("txtAISecretKey").value;
+      if (!keyVal || keyVal.trim().length < 8) {
+        alert("Por favor ingresa una clave de al menos 8 caracteres.");
+        return;
+      }
+
+      try {
+        const res = await apiFetch("/api/v1/ai/key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: prov,
+            key_value: keyVal.trim(),
+          }),
+        });
+        if (res.ok) {
+          document.getElementById("txtAISecretKey").value = "";
+          alert("Clave cifrada con éxito y almacenada con permisos 0600.");
+          await loadAIConfig();
+        } else {
+          const err = await res.json();
+          alert("Error al almacenar clave: " + (err.detail || "Error desconocido"));
+        }
+      } catch (err) {
+        alert("Error de red: " + err.message);
+      }
+    }
+
+    async function handleDeleteAIKey() {
+      const prov = document.getElementById("selAIProvider").value;
+      if (!confirm(`¿Eliminar de forma segura la clave almacenada para ${prov.toUpperCase()}?`)) {
+        return;
+      }
+      try {
+        const res = await apiFetch(`/api/v1/ai/key?provider=${encodeURIComponent(prov)}`, {
+          method: "DELETE",
+        });
+        if (res.ok) {
+          alert("Clave eliminada del almacenamiento seguro.");
+          await loadAIConfig();
+        }
+      } catch (err) {
+        alert("Error al eliminar: " + err.message);
+      }
+    }
+
+    async function handleRunSimulateCall() {
+      const prov = document.getElementById("selAIProvider").value;
+      const op = document.getElementById("selSimOperation").value;
+      const prompt = document.getElementById("txtSimPrompt").value;
+      const forceFallback = document.getElementById("chkForceFallback").checked;
+      const resultContainer = document.getElementById("aiSimResultContainer");
+
+      resultContainer.innerHTML = `<span style="color: var(--accent);">Ejecutando simulación...</span>`;
+
+      try {
+        const res = await apiFetch("/api/v1/ai/simulate-call", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: prov,
+            operation: op,
+            prompt: prompt,
+            expected_output_tokens: 200,
+            force_fallback: forceFallback,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          resultContainer.innerHTML = `<span style="color: #ef4444;">Error: ${escapeHtml(data.detail || "Fallo")}</span>`;
+          return;
+        }
+
+        let html = ``;
+        if (data.is_fallback) {
+          html += `
+            <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">
+              <strong style="color: #f59e0b;">⚡ Alternativa Determinista Ejecutada (Sin consumo de tokens):</strong><br>
+              <span style="font-size: 0.8rem; color: var(--text-muted);">${escapeHtml(data.fallback_reason || "Reglas deterministas")}</span>
+            </div>
+            <pre style="background: #0f172a; padding: 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; white-space: pre-wrap;">${escapeHtml(JSON.stringify(data.data, null, 2))}</pre>
+          `;
+        } else {
+          html += `
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">
+              <strong style="color: #10b981;">✓ Simulación completada con éxito</strong><br>
+              <span style="font-size: 0.78rem; color: var(--text-muted);">
+                Tokens In: <strong>${data.input_tokens}</strong> | Tokens Out: <strong>${data.output_tokens}</strong> | Costo: <strong>$${Number(data.cost_incurred_usd).toFixed(6)} USD</strong> | Saldo restante: <strong>$${Number(data.remaining_budget_usd).toFixed(4)} USD</strong>
+              </span>
+            </div>
+            <pre style="background: #0f172a; padding: 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; white-space: pre-wrap;">${escapeHtml(data.data.text || JSON.stringify(data.data, null, 2))}</pre>
+          `;
+        }
+        resultContainer.innerHTML = html;
+        await loadAIConfig();
+      } catch (err) {
+        resultContainer.innerHTML = `<span style="color: #ef4444;">Error de red: ${escapeHtml(err.message)}</span>`;
+      }
+    }
+
+    async function loadAICostLogs() {
+      if (!authToken) return;
+      try {
+        const res = await apiFetch("/api/v1/ai/cost-logs?limit=25");
+        if (!res.ok) return;
+        const data = await res.json();
+        const tbody = document.querySelector("#tblAICostLogs tbody");
+        if (!tbody) return;
+
+        if (!data.logs || data.logs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Sin consumos registrados en este tenant.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = data.logs.map(log => {
+          const dt = log.created_at ? new Date(log.created_at).toLocaleString() : "—";
+          return `
+            <tr>
+              <td style="font-size: 0.8rem;">${escapeHtml(dt)}</td>
+              <td><code>${escapeHtml(log.provider)}</code></td>
+              <td style="font-size: 0.8rem;">${escapeHtml(log.model_used)}</td>
+              <td><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: var(--accent);">${escapeHtml(log.operation)}</span></td>
+              <td>${log.input_tokens}</td>
+              <td>${log.output_tokens}</td>
+              <td style="font-weight: 600;">$${Number(log.estimated_cost_usd).toFixed(6)}</td>
+              <td><span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8;">Simulación</span></td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        console.error("Error al cargar cost logs:", err);
+      }
+    }
+
     async function loadInitialData() {
       await loadProfileData();
       await loadCVImportData();
@@ -2142,6 +2636,7 @@
       await loadVacancies();
       await loadCRM();
       await loadTasks();
+      await loadAIConfig();
     }
 
     window.addEventListener("DOMContentLoaded", async () => {

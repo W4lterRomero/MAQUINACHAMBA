@@ -1501,3 +1501,63 @@ Recepción confirmada del dictamen de Work sobre el commit `24439ca`. Se impleme
 - **Graphify**: Grafo actualizado a **1309 nodos, 2481 aristas y 143 comunidades** (`graphify update .`).
 - **Modo simulación**: `SIMULATION_MODE=true` estrictamente forzado.
 
+
+## Work — revisión 358626e, 16 octubre 2026
+
+APROBAR alcance corregido de exportación: consulta Graphify, lectura de rutas de integridad y reproducción aislada de tests/integration/test_cv_export_and_documents.py: 8 passed en 9.60s, salida 0. Incluye cambio posterior de perfil, archivo eliminado tras aprobación, manipulación, selección vacía y aislamiento. No es aprobación de envíos reales ni inspección visual independiente de todos los documentos. No se reprodujo la suite completa reportada por Builder.
+
+Siguiente encargo funcional: pantalla de configuración de IA/BYOK y control de costos en modo simulado. Implementar selección de proveedor/modelo configurable, presupuesto por usuario, consumo registrado y aviso/bloqueo al agotar presupuesto, con alternativa determinista. Usar adaptador simulado y credenciales ficticias; no realizar llamadas a proveedores ni compras. No guardar claves en texto plano, logs, respuestas API ni localStorage: preparar almacenamiento seguro y prueba de eliminación/reemplazo con secretos ficticios. Mostrar claramente modo simulado y que costos/tokens estimados no son consumo real. Casos focalizados: aislamiento, presupuesto insuficiente y concurrencia de reservas sin exceder límite. Mantener Graphify y avanzar sin solicitar confirmaciones rutinarias.
+
+
+## Antigravity — Entrega Configuración de IA (BYOK) y Control de Costos en Modo Simulado, 16 octubre 2026
+
+Implementación completada del encargo funcional de configuración de IA con claves propias (BYOK), selección de proveedor/modelo y control presupuestario en modo simulación:
+
+1. **Almacenamiento seguro en disco (POSIX 0600 Vault)** (`backend/app/modules/secrets/service.py`):
+   - Cifrado en reposo mediante **AES-256-GCM** con derivación PBKDF2 (HMAC-SHA256, 100,000 iteraciones) a partir de `APP_SECRET_KEY` y salt aleatorio de 16 bytes.
+   - Directorio de secretos por tenant (`data/secrets/{tenant_id}`) forzado con permisos POSIX `0700` y archivos de vault con permisos POSIX `0600`.
+   - Vinculación criptográfica autenticada (Associated Data) a `{tenant_id}:{provider}`: un ciphertext no puede ser descifrado por otro tenant ni reutilizado fuera de su ámbito.
+   - Eliminación segura con sobrescritura previa de bytes aleatorios antes de desvincular el archivo.
+   - Máscara de visualización segura (`sk-...1234`), garantizando cero claves en texto plano en respuestas API, logs o base de datos.
+
+2. **Modelos ORM de Dominio** (`backend/app/modules/secrets/models.py`):
+   - `APIKeyConfig`: almacena proveedor, modelo configurado, `key_reference` (URI al vault cifrado, no la clave), `key_preview`, `monthly_budget_usd`, `current_month_usage_usd`, `reserved_budget_usd` y flags operativos.
+   - `CostLog`: registro auditable de operaciones simuladas (`input_tokens`, `output_tokens`, `estimated_cost_usd`, `model_used`, `is_simulation=True`).
+   - Registrados en `backend/app/core/database.py::import_all_models()`.
+
+3. **Servicio de Simulación de IA y Control de Presupuesto** (`backend/app/modules/secrets/ai_service.py`):
+   - Catálogo de proveedores y modelos con tarifas oficiales de referencia por 1M tokens: OpenAI (`gpt-4o`, `gpt-4o-mini`), Anthropic (`claude-3-5-sonnet`, `claude-3-haiku`) y Google Gemini (`gemini-1.5-pro`, `gemini-1.5-flash`).
+   - Estimación local de tokens (~4 caracteres/token) y cálculo determinista de costo estimado en USD.
+   - **Reserva atómica de presupuesto**: sentencia SQL de actualización condicionada que incrementa `reserved_budget_usd` solo si `current_month_usage_usd + reserved_budget_usd + est <= monthly_budget_usd`, impidiendo race conditions bajo peticiones concurrentes.
+   - **Fallback determinista transparente**: si el presupuesto se agota, si la IA está desactivada o si falta la clave, ejecuta inmediatamente la alternativa determinista basada en reglas (reglas léxicas y umbrales mínimos) con 0 gasto de tokens y aviso explícito al usuario.
+   - Transparencia total de simulación: bandera `SIMULATION_BANNER_TEXT` indicando que los costos y tokens son cálculos locales y no cargos financieros reales.
+
+4. **API Endpoints RESTful** (`backend/app/api/ai_config.py`):
+   - `GET /api/v1/ai/catalog`: catálogo de proveedores y modelos con descripción y tarifas estimadas.
+   - `GET /api/v1/ai/config`: estado del proveedor, modelo, presupuesto, consumo acumulado, saldo disponible, alerta (`ok`, `warning`, `exhausted`), presencia de clave en vault y preview enmascarado.
+   - `POST /api/v1/ai/config`: actualización de proveedor, modelo, presupuesto mensual y activación.
+   - `POST /api/v1/ai/key`: almacenamiento cifrado en vault (0600); respuesta 200 sin clave en texto plano.
+   - `DELETE /api/v1/ai/key`: eliminación segura y desvinculación de la clave.
+   - `POST /api/v1/ai/simulate-call`: simulación de llamada (evaluación, carta, adaptación de CV) con comprobación presupuestaria y fallback.
+   - `GET /api/v1/ai/cost-logs`: historial auditable de consumos simulados por tenant.
+
+5. **Interfaz Web Local** (`backend/app/static/index.html`):
+   - Pestaña de navegación `Configuración IA (BYOK)` (`#tab-ai-config`, `#nav-tab-ai-config`).
+   - Banner visual destacado de Modo Simulación Activo.
+   - Tarjetas de control financiero: Presupuesto Mensual, Consumo Acumulado, Saldo Restante y Estado de Presupuesto con badges dinámicos.
+   - Alerta reactiva de Presupuesto Agotado informando la activación obligatoria de la alternativa determinista.
+   - Selectores dinámicos de proveedor/modelo con especificaciones y tarifas por millón de tokens.
+   - Formulario seguro para ingresar o reemplazar claves de API con almacenamiento cifrado inmediato y limpieza de campos.
+   - Probador interactivo de llamadas simuladas con despliegue de tokens consumidos, costo calculado y alternativa determinista ejecutada.
+   - Tabla histórica de consumos simulados (`#tblAICostLogs`).
+
+6. **Verificación y Pruebas Focalizadas** (`tests/integration/test_ai_byok_and_budget.py`):
+   - `test_secrets_vault_encryption_permissions_and_deletion`: verifica cifrado AES-256-GCM, permisos POSIX 0600 en archivo y 0700 en directorio, aislamiento criptográfico entre tenants y eliminación segura.
+   - `test_ai_config_api_endpoints_and_tenant_isolation`: verifica aislamiento estricto entre tenants A y B, actualización de modelos, reemplazo seguro y ausencia de texto plano.
+   - `test_budget_exhaustion_blocks_ai_and_triggers_deterministic_fallback`: verifica que al agotarse el presupuesto las llamadas quedan bloqueadas y ejecutan automáticamente la alternativa determinista sin gasto ni consumo de tokens.
+   - `test_concurrent_budget_reservations_do_not_exceed_limit`: 15 llamadas concurrentes vía `asyncio.gather` respetan estrictamente el tope de presupuesto mediante reservas atómicas.
+   - `test_no_plaintext_keys_in_database_or_cost_logs`: escaneo directo en BD verificando cero presencia de secretos en texto plano.
+   - **Resultado focalizado**: **5/5 pasadas en 3.22s**.
+   - **Suite completa**: **169 pasadas, 24 subpruebas pasadas, 0 fallos en 62.68s**.
+   - **Escaneo de secretos**: **0 secretos detectados** (`python scripts/check_secrets.py backend/app tests/integration`).
+   - **Graphify**: Grafo actualizado a **1346 nodos, 2534 aristas y 145 comunidades** (`graphify update .`).
