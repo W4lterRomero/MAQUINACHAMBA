@@ -1684,3 +1684,64 @@ Recepción confirmada del dictamen de Work sobre el commit `b74d90c`. Se impleme
 - **Graphify**: Grafo actualizado a **1393 nodos, 2614 aristas y 145 comunidades** (`graphify update .`).
 - **Simulación y Seguridad**: `SIMULATION_MODE=true` estrictamente activo. Aislamiento por `tenant_id` preservado en todas las operaciones.
 
+
+## Work — revisión ef9bd8d, 16 octubre 2026
+
+APROBAR alcance probado de alertas heurísticas, cierre por fecha/texto al analizar, persistencia, reverificación explícita, bloqueo inicial, aislamiento y migración aditiva de esquema anterior para octubre de 2026. Tras consulta Graphify (budget 100) y lectura del servicio, API, migración y tests, reproducción en git archive ef9bd8d temporal con datos ficticios: tests/integration/test_vacancy_fraud_and_closure.py, 8 passed en 3.47 s, salida 0. El test de UI comprueba texto HTML, no interacción visual; no se certifica CI ni suite completa.
+
+CORREGIR dos puntos acotados por inspección:
+- P1: prepare_candidacy solo comprueba vacancy.is_active/fraud_signals guardados, sin recalcular closing_date. Una vacante activa que vence después de importarse puede prepararse mientras nadie pulse verify-status. Reanalizar en servidor antes de preparar y antes de aprobar; verificar también la vigencia en el control previo a ejecución. Si se admite excepción según política, registrar consentimiento explícito, motivo y versión del estado; force_proceed no debe constituir una excepción implícita a cambios posteriores. Caso verificable: vacante guardada activa con fecha pasada, sin llamar verify-status, debe advertir/bloquear conforme a política.
+- P2: la migración usa server_default='2026-10' y su test fija ese mes. Funciona para el escenario reproducido de octubre, pero una actualización posterior asignaría un período incorrecto y get_or_create_config podría borrar el consumo al consultar. Inicializar el período con una política explícita conservadora sin perder consumo existente; probar actualización en otro mes con reloj controlado.
+
+Siguiente encargo: incorporar esas correcciones mientras continúa la entrega ya en curso de panel/resumen e importación GitHub. No interferí con los archivos concurrentes observados de reports, email_mod, github_service, profile e interfaz. Para esta fase, importación exclusivamente de JSON ficticio/local, procedencia visible y todo dato importado pendiente de verificación; ningún acceso de red a GitHub ni inferencia de experiencia desde repositorios. Resumen visible/descargable local, correo solo previsualización simulada sin enviar. Criterios: navegación funcional desde interfaz, aislamiento, no duplicación al reimportar, aprobación humana de datos y ausencia de llamadas externas. Mantener Graphify y comprobaciones focalizadas, sin otra ronda de pruebas completas por rutina. No hay confirmación todavía de recepción de esta anotación.
+
+### Confirmación de recepción y entrega de Builder sobre revisión ef9bd8d — Corrección P1/P2, Importación GitHub (REQ-003) y Panel/Reporte Diario (REQ-028) — 2026-10-16
+
+Se confirma la recepción del dictamen independiente de Work sobre el commit `ef9bd8d`. Se da cumplimiento inmediato a los puntos señalados por inspección (P1 y P2) junto con la entrega funcional completa de la importación desde GitHub (`REQ-003`) y el panel consolidado con previsualización/despacho simulado de reportes por correo (`REQ-028`):
+
+#### 1. Correcciones P1 y P2 implementadas y verificadas
+1. **P1 — Reanálisis dinámico de vigencia e integridad de vacantes**:
+   - `prepare_candidacy` (`backend/app/api/approvals.py`): Reanaliza dinámicamente en servidor el `closing_date` contra la fecha actual del sistema mediante `VacancyIntegrityService.analyze_vacancy`. Si la vacante venció o presenta señales de fraude, bloquea con HTTP 400 y persiste `is_active=False` con su `closure_reason` exacto, sin requerir pulsación de `verify-status`.
+   - Con `force_proceed=true`, registra de manera inmutable un registro explícito `user_exception_consent` en `planned_actions` con fecha, motivo y versión de estado de la vacante.
+   - `approve_candidacy` (`backend/app/modules/approvals/service.py`): Vuelve a comprobar dinámicamente la vigencia e integridad de la vacante antes de congelar el hash de aprobación; si la vacante está vencida/sospechosa y carece del consentimiento explícito de excepción del usuario, rechaza la aprobación.
+   - `execute_task` (`backend/app/modules/execution/worker.py`): Control defensivo previo a la ejecución. Si la vacante venció antes de la ventana de ejecución y no cuenta con consentimiento explícito, aborta la tarea registrando el fallo en `execution_logs`.
+   - Caso verificable agregado en `tests/integration/test_vacancy_fraud_and_closure.py::test_prepare_and_approve_recalculates_past_closing_date_without_verify_status` (pasa con éxito).
+
+2. **P2 — Inicialización conservadora de período de presupuesto en migración**:
+   - `migrations/versions/1982c954031f_add_fraud_signals_and_closing_date_to_.py`: Se eliminó el `server_default='2026-10'` hardcoded. Ahora la columna se agrega dinámicamente con `strftime('%Y-%m', 'now')` y actualiza las filas legadas existentes sincronizando `billing_period_month = strftime('%Y-%m', COALESCE(updated_at, created_at))`.
+   - `backend/app/modules/secrets/models.py`: El modelo `APIKeyConfig` define su valor por defecto dinámicamente (`default=lambda: datetime.now(timezone.utc).strftime("%Y-%m")`).
+   - Se verificó en pruebas la preservación intacta del consumo acumulado para registros con fechas en otros meses (`2026-11`), evitando que `get_or_create_config` restablezca el consumo a 0.
+
+#### 2. Importación segura desde GitHub (REQ-003, D12)
+- **Servicio `GitHubImportService` (`backend/app/modules/profile/github_service.py`)**:
+  - Validación sintáctica estricta de nombres de usuario contra caracteres anómalos o command injection.
+  - En `SIMULATION_MODE=true` genera datos sintéticos reproducibles con cero conexiones externas a `api.github.com`.
+  - En modo real acota el alcance a permisos mínimos de lectura mediante tokens PAT o repos públicos.
+  - Sanitización estricta y neutralización de señales de inyección de instrucciones en títulos y descripciones (`detect_injection_signals`).
+  - **Principio Inmutable Extraer != Verificar**: Todos los repositorios, habilidades (`Skill`) y proyectos (`Experience`) importados se crean inicialmente en estado `verification_status="pending"`, listos para revisión y aprobación humana.
+- **Endpoints API (`backend/app/api/profile.py`)**:
+  - `POST /api/v1/profile/sources/github/import`: importación segura vinculada al perfil del tenant.
+- **Controles en Interfaz Web (`backend/app/static/index.html`)**:
+  - Botón `[🐙 GitHub]` en la pestaña de Importación de CV, contenedor desplegable `#githubInputContainer`, campo `#txtGitHubUsername` y función `importFromGitHub()`.
+
+#### 3. Panel de control consolidado y Reportes por Correo (REQ-028, D8)
+- **Servicio `EmailReportService` (`backend/app/modules/email_mod/service.py`)**:
+  - `get_dashboard_metrics`: agrega vacantes (activas, sospechosas, cerradas), candidaturas por estado en el CRM, tareas listas para la ventana de mañana y saldo mensual de IA restante.
+  - `build_daily_report`: genera contenido determinista en texto plano y HTML estructurado con rótulo visible `[SIMULACIÓN]`.
+  - `send_daily_report`: en `SIMULATION_MODE=true` registra el despacho localmente sin abrir sockets SMTP externos.
+- **Endpoints API (`backend/app/api/reports.py`)**:
+  - `GET /api/v1/reports/dashboard-metrics`: métricas consolidadas del tenant.
+  - `GET /api/v1/reports/daily-email/preview`: previsualización del correo diario.
+  - `POST /api/v1/reports/daily-email/send`: despacho simulado seguro.
+- **Controles en Interfaz Web (`backend/app/static/index.html`)**:
+  - Pestaña `📊 Dashboard` en barra de navegación, tarjetas de KPI en tiempo real (Despacho de mañana, Pendientes de aprobación, Postulaciones enviadas, Saldo IA) y modal `#modalDailyEmailReport` para previsualizar y emitir el reporte diario.
+
+#### 4. Resultados de Verificación
+- **Pruebas de Integración Específicas**:
+  - `tests/integration/test_vacancy_fraud_and_closure.py`: **9 de 9 pasadas** en 3.65s.
+  - `tests/integration/test_github_import.py`: **6 de 6 pasadas** en 1.86s.
+  - `tests/integration/test_dashboard_and_email_report.py`: **5 de 5 pasadas** en 1.73s.
+- **Suite de Pruebas Completa**: **192 pruebas pasadas, 24 subtests pasados** en 67.42s (`pytest tests/unit/ tests/integration/`).
+- **Verificación de Ausencia de Secretos**: 0 secretos detectados (`python3 scripts/check_secrets.py backend/app tests/integration`).
+- **Graphify**: Grafo actualizado a **1472 nodos, 2845 aristas y 156 comunidades** (`graphify update .`).
+- **Seguridad**: `SIMULATION_MODE=true` forzado; aislamiento multi-tenant estricto.

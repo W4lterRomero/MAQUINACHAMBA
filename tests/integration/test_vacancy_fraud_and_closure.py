@@ -293,6 +293,114 @@ async def test_prepare_candidacy_protection_and_force_proceed(
 
 
 @pytest.mark.asyncio
+async def test_prepare_and_approve_recalculates_past_closing_date_without_verify_status(
+    client: AsyncClient, auth_headers: dict, test_tenant_id: str
+):
+    """
+    P1 / Work revisión:
+    Una vacante guardada activa con closing_date en el pasado (que venció después de crearse)
+    debe reanalizarse automáticamente en el servidor y bloquearse sin requerir llamada a verify-status.
+    Con force_proceed=True, registra user_exception_consent explícito con motivo y versión de estado,
+    permitiendo la aprobación informada.
+    """
+    async with async_session_factory() as session:
+        # Perfil y CV
+        p_res = await session.execute(select(UserProfile).where(UserProfile.tenant_id == test_tenant_id))
+        prof = p_res.scalars().first()
+        if not prof:
+            prof = UserProfile(
+                id=str(uuid.uuid4()),
+                tenant_id=test_tenant_id,
+                full_name="Usuario P1",
+                email="p1@example.org",
+                location_city="CDMX",
+                location_country="México",
+                verification_status="verified",
+            )
+            session.add(prof)
+            await session.flush()
+
+        cv_res = await session.execute(select(MasterCV).where(MasterCV.tenant_id == test_tenant_id))
+        cv = cv_res.scalars().first()
+        if not cv:
+            cv = MasterCV(
+                id=str(uuid.uuid4()),
+                tenant_id=test_tenant_id,
+                profile_id=prof.id,
+                name="CV P1",
+                specialization="Backend",
+                is_active=True,
+                version=1,
+            )
+            session.add(cv)
+            await session.flush()
+
+        # Vacante guardada inicialmente como ACTIVA pero con fecha límite pasada
+        past_date = date.today() - timedelta(days=3)
+        vac_expired = Vacancy(
+            id=str(uuid.uuid4()),
+            tenant_id=test_tenant_id,
+            company_name="Empresa Pasada S.A.",
+            job_title="Dev Pasado",
+            source_url="https://ejemplo.com/pasada",
+            description="Vacante normal sin texto de cierre pero fecha expirada",
+            closing_date=past_date,
+            is_active=True,  # Guardada como activa previamente
+            fraud_signals=[],
+            closure_reason=None,
+            dedup_hash=f"dedup-{uuid.uuid4().hex}",
+        )
+        session.add(vac_expired)
+        await session.commit()
+        vac_id = vac_expired.id
+        cv_id = cv.id
+
+    # 1. Intentar preparar sin force_proceed y SIN llamar a verify-status
+    # Debe recalcular dinámicamente en servidor y bloquear
+    res_block = await client.post(
+        "/api/v1/candidacies/prepare",
+        json={"vacancy_id": vac_id, "cv_id": cv_id, "force_proceed": False},
+        headers=auth_headers,
+    )
+    assert res_block.status_code == 400
+    detail = res_block.json()["detail"].lower()
+    assert "bloqueada por seguridad" in detail
+    assert "vencida" in detail or "cerrada" in detail
+
+    # Verificar que en la base de datos se actualizó is_active=False
+    async with async_session_factory() as session:
+        v_db = (await session.execute(select(Vacancy).where(Vacancy.id == vac_id))).scalar_one()
+        assert v_db.is_active is False
+        assert "vencida" in (v_db.closure_reason or "").lower()
+
+    # 2. Preparar con force_proceed=True: procede y registra user_exception_consent
+    res_force = await client.post(
+        "/api/v1/candidacies/prepare",
+        json={"vacancy_id": vac_id, "cv_id": cv_id, "force_proceed": True},
+        headers=auth_headers,
+    )
+    assert res_force.status_code == 201
+    cand_id = res_force.json()["id"]
+
+    # 3. Comprobar que en la candidatura se registró el consentimiento explícito
+    cand_data = (await client.get(f"/api/v1/candidacies/{cand_id}", headers=auth_headers)).json()
+    planned = cand_data["candidacy"]["planned_actions"]
+    consent_action = next((a for a in planned if a.get("action") == "user_exception_consent"), None)
+    assert consent_action is not None
+    assert consent_action["is_closed"] is True
+    assert "vencida" in consent_action["reason"].lower()
+
+    # 4. Aprobar la candidatura: dado que cuenta con consentimiento explícito, se autoriza
+    app_res = await client.post(
+        f"/api/v1/candidacies/{cand_id}/approve",
+        json={"user_timezone": "America/Mexico_City", "notes": "Aprobado con excepción de vacante vencida"},
+        headers=auth_headers,
+    )
+    assert app_res.status_code == 200
+    assert app_res.json()["status"] == "approved_and_scheduled"
+
+
+@pytest.mark.asyncio
 async def test_tenant_isolation_on_vacancies(client: AsyncClient, auth_headers: dict):
     """Verifica aislamiento estricto por tenant_id en vacantes y operaciones."""
     other_tenant = "other-tenant-99999999-9999-9999-9999-999999999999"
@@ -408,6 +516,12 @@ def test_migration_additive_compatibility_with_prior_schema(tmp_path):
             10.0, 0.005432, 0.0, 4096, 2, 1, '2026-10-15 12:00:00', '2026-10-15 12:00:00'
         )
     """)
+    cur.execute("""
+        INSERT INTO api_key_configs VALUES (
+            'cfg-legacy-2', 'tenant-102', 'anthropic', 'claude-3-haiku', 'vault://ref2', 'sk-...5678',
+            15.0, 1.2345, 0.0, 4096, 2, 1, '2026-11-20 15:30:00', '2026-11-20 15:30:00'
+        )
+    """)
 
     # Crear tabla vacancies con esquema previo
     cur.execute("""
@@ -474,6 +588,12 @@ def test_migration_additive_compatibility_with_prior_schema(tmp_path):
     assert row is not None
     assert abs(row[0] - 0.005432) < 1e-7
     assert row[1] == "2026-10"
+
+    cur_v.execute("SELECT current_month_usage_usd, billing_period_month FROM api_key_configs WHERE id = 'cfg-legacy-2'")
+    row2 = cur_v.fetchone()
+    assert row2 is not None
+    assert abs(row2[0] - 1.2345) < 1e-7
+    assert row2[1] == "2026-11"
 
     # Inspeccionar columnas de vacancies
     cur_v.execute("PRAGMA table_info(vacancies)")

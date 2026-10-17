@@ -7,7 +7,7 @@ from datetime import datetime, time, timezone
 import hashlib
 import json
 import os
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from backend.app.modules.profile.models import UserProfile, Skill, Experience
 from backend.app.modules.cv.models import MasterCV
 from backend.app.modules.cv.generator import CVDocumentGenerator
 from backend.app.modules.vacancies.models import Vacancy
+from backend.app.modules.vacancies.service import VacancyIntegrityService
 from backend.app.modules.evaluation.models import Evaluation
 from backend.app.modules.approvals.models import Candidacy, Approval, ScheduledTask, CandidacyDocument
 from backend.app.modules.crm.models import CRMEntry, CRMEvent
@@ -57,6 +58,7 @@ class ApprovalService:
         vacancy: Vacancy,
         evaluation: Optional[Evaluation] = None,
         cover_letter: Optional[str] = None,
+        exception_consent: Optional[Dict[str, Any]] = None,
     ) -> Candidacy:
         """
         Fase de preparación: compila los documentos y paquete de postulación.
@@ -201,6 +203,8 @@ class ApprovalService:
             {"action": "fill_application_form", "fields": ["name", "email", "cv", "letter"]},
             {"action": "submit_candidacy", "method": "portal_mock"},
         ]
+        if exception_consent:
+            planned_actions.append(exception_consent)
 
         candidacy = Candidacy(
             tenant_id=tenant_id,
@@ -304,6 +308,49 @@ class ApprovalService:
 
         if candidacy.status not in ("pending_approval", "postponed"):
             raise ValueError(f"No se puede aprobar una candidatura en estado: {candidacy.status}")
+
+        # Validar vigencia e integridad de la vacante (P1, REQ-009)
+        v_stmt = select(Vacancy).where(Vacancy.id == candidacy.vacancy_id, Vacancy.tenant_id == tenant_id)
+        v_res = await session.execute(v_stmt)
+        vacancy = v_res.scalar_one_or_none()
+        if vacancy:
+            analysis = VacancyIntegrityService.analyze_vacancy(
+                title=vacancy.job_title,
+                description=vacancy.description,
+                source_url=vacancy.source_url or "",
+                salary_min=float(vacancy.salary_min) if vacancy.salary_min else None,
+                salary_max=float(vacancy.salary_max) if vacancy.salary_max else None,
+                salary_currency=vacancy.salary_currency or "USD",
+                closing_date=vacancy.closing_date,
+                reference_date=c.now_utc().date(),
+            )
+            was_inactive = not vacancy.is_active
+            is_closed = was_inactive or analysis["is_closed"]
+            is_fraud_suspect = analysis["is_fraud_suspect"] or any(s.get("severity") == "high" for s in (vacancy.fraud_signals or []))
+
+            # Sincronizar estado en vacante
+            vacancy.is_active = not is_closed
+            existing_signals = {s.get("id"): s for s in (vacancy.fraud_signals or [])}
+            for s in analysis["fraud_signals"]:
+                existing_signals[s["id"]] = s
+            vacancy.fraud_signals = list(existing_signals.values())
+
+            if analysis["closure_reason"]:
+                vacancy.closure_reason = analysis["closure_reason"]
+            elif was_inactive and not vacancy.closure_reason:
+                vacancy.closure_reason = "Vacante inactiva en el sistema."
+            vacancy.last_verified_at = c.now_utc()
+            session.add(vacancy)
+            await session.flush()
+
+            if is_closed or is_fraud_suspect:
+                actions = candidacy.planned_actions or []
+                consent = next((a for a in actions if a.get("action") == "user_exception_consent"), None)
+                if not consent:
+                    reason_str = vacancy.closure_reason or "Señales de fraude de alta gravedad detectadas."
+                    raise ValueError(
+                        f"No se puede aprobar la candidatura: la vacante está cerrada o presenta indicios de fraude ({reason_str}) y no cuenta con consentimiento explícito de excepción."
+                    )
 
         # 2. Calcular hash inmutable del paquete
         content_hash = cls.compute_candidacy_hash(candidacy)

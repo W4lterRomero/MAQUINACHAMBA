@@ -49,8 +49,17 @@ def upgrade() -> None:
         if 'billing_period_month' not in api_cols:
             with op.batch_alter_table('api_key_configs', schema=None) as batch_op:
                 batch_op.add_column(
-                    sa.Column('billing_period_month', sa.String(length=7), nullable=False, server_default='2026-10')
+                    sa.Column('billing_period_month', sa.String(length=7), nullable=False, server_default=sa.text("strftime('%Y-%m', 'now')"))
                 )
+            # Para filas existentes, sincronizar billing_period_month con su fecha de creación/actualización
+            # para preservar de forma conservadora el consumo acumulado sin forzar meses fijos
+            bind.execute(
+                sa.text(
+                    "UPDATE api_key_configs "
+                    "SET billing_period_month = strftime('%Y-%m', COALESCE(updated_at, created_at)) "
+                    "WHERE updated_at IS NOT NULL OR created_at IS NOT NULL"
+                )
+            )
 
     if 'cost_logs' not in existing_tables:
         op.create_table('cost_logs',

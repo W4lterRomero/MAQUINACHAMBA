@@ -19,6 +19,7 @@ from backend.app.modules.approvals.models import Candidacy, Approval, ScheduledT
 from backend.app.modules.approvals.service import ApprovalService
 from backend.app.modules.scheduling.service import SchedulingService
 from backend.app.modules.crm.models import CRMEntry, CRMEvent
+from backend.app.modules.vacancies.models import Vacancy
 from backend.app.modules.portals.adapters.mock_adapter import MockPortalAdapter, PortalSubmissionResult
 
 logger = logging.getLogger("maquinachamba.worker")
@@ -274,6 +275,38 @@ class DurableExecutionWorker:
             session.add(log)
             await session.commit()
             return False, f"Ejecución bloqueada por política: {pkg_reason}"
+
+        # 4.1.b Verificación de vigencia e integridad de la vacante en tiempo de ejecución (P1, REQ-009)
+        v_res = await session.execute(
+            select(Vacancy).where(
+                Vacancy.id == candidacy.vacancy_id,
+                Vacancy.tenant_id == persisted_task.tenant_id,
+            )
+        )
+        vacancy = v_res.scalar_one_or_none()
+        if vacancy:
+            current_date = self.clock.now_utc().date()
+            if vacancy.closing_date and vacancy.closing_date < current_date:
+                actions = candidacy.planned_actions or []
+                has_consent = any(a.get("action") == "user_exception_consent" for a in actions)
+                if not has_consent:
+                    persisted_task.status = "failed"
+                    persisted_task.locked_by = None
+                    persisted_task.lease_expires_at = None
+                    log = ExecutionLog(
+                        tenant_id=persisted_task.tenant_id,
+                        task_id=persisted_task.id,
+                        candidacy_id=candidacy.id,
+                        action="validate_vacancy_validity",
+                        result="failure",
+                        error_message=f"Bloqueo previo a ejecución: la vacante venció ({vacancy.closing_date} < {current_date}) sin excepción autorizada.",
+                        started_at=start_dt,
+                        completed_at=self.clock.now_utc(),
+                        duration_ms=0,
+                    )
+                    session.add(log)
+                    await session.commit()
+                    return False, f"Ejecución bloqueada: la vacante ha expirado ({vacancy.closing_date})."
 
         # 4.2 Verificación de modo simulación vs capacidades del adaptador (P1 - Simulación)
         is_sim_adapter = getattr(self.portal, "simulation_mode", False) is True or getattr(self.portal, "CAPABILITIES", {}).get("mode") == "simulation_only"

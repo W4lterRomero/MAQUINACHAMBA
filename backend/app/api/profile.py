@@ -14,12 +14,19 @@ from backend.app.api.deps import get_session, get_tenant_id
 from backend.app.modules.profile.models import UserProfile, Skill, Experience, ProfessionalSource
 from backend.app.modules.profile.parser import InvalidDocumentError, MAX_CV_FILE_SIZE
 from backend.app.modules.profile.service import ProfileSourceService
+from backend.app.modules.profile.github_service import GitHubImportService, GitHubImportError
 from backend.app.modules.cv.models import MasterCV
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
 
 # Schemas
+class GitHubImportRequest(BaseModel):
+    username: str
+    access_token: Optional[str] = None
+    max_repos: int = 5
+
+
 class SkillCreate(BaseModel):
     name: str
     category: str = "technical"
@@ -621,6 +628,42 @@ async def import_cv_json(
         return result
     except InvalidDocumentError as ide:
         raise HTTPException(status_code=400, detail=str(ide))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+
+@router.post("/sources/github/import", status_code=status.HTTP_201_CREATED)
+async def import_github_repositories(
+    payload: GitHubImportRequest,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Importa repositorios y proyectos de GitHub con permisos mínimos (REQ-003, D12).
+    Genera entidades Skill y Experience en estado 'pending' para revisión humana.
+    """
+    p_res = await session.execute(
+        select(UserProfile)
+        .where(UserProfile.tenant_id == tenant_id)
+        .order_by(UserProfile.created_at.desc())
+    )
+    profile = p_res.scalars().first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Perfil no configurado. Cree el perfil primero.")
+
+    try:
+        result = await GitHubImportService.import_github_profile(
+            session=session,
+            tenant_id=tenant_id,
+            profile_id=profile.id,
+            username=payload.username,
+            token=payload.access_token,
+            max_repos=payload.max_repos,
+        )
+        await session.commit()
+        return result
+    except GitHubImportError as gie:
+        raise HTTPException(status_code=400, detail=str(gie))
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 

@@ -13,7 +13,7 @@
 |----|-----------|----------|:----:|:---------:|:------:|--------|
 | REQ-001 | Perfil profesional configurable sin editar código | D7, D12 | 1 | P1 | ✅ | `api/profile.py`, `test_api_v1_endpoints.py::test_profile_and_cv_api_flow` |
 | REQ-002 | Importar CV en PDF/DOCX con revisión humana | D12 | 2 | P1 | ✅ | `test_cv_import_and_verification.py`, `test_cv_import_and_review_ui.py` |
-| REQ-003 | Importar GitHub con autorización y permisos mínimos | D12 | 2 | P1 | ⬜ | T-003 |
+| REQ-003 | Importar GitHub con autorización y permisos mínimos | D12 | 2 | P1 | ✅ | `test_github_import.py`, `profile/github_service.py` |
 | REQ-004 | Varios CV maestros especializados | D9 | 2 | P1 | ✅ | `api/profile.py`, `cv/models.py`, `test_api_v1_endpoints.py` |
 | REQ-005 | Consistencia entre CV maestros y perfil | D9 | 2 | P1 | ✅ | `test_cv_import_and_review_ui.py`, `api/cv.py` |
 | REQ-006 | Perfil de comunicación con cuestionario | D10 | 2 | P1 | ✅ | `test_communication_profile.py`, `api/communication.py` |
@@ -38,7 +38,7 @@
 | REQ-025 | Autorización específica para crear cuentas | D15 | 3 | P0 | ✅ | `test_security.py::test_account_creation_requires_authorization` |
 | REQ-026 | CRM con tabla, Kanban y detalle | D8 | 1 | P1 | ✅ | `api/crm.py`, `CRMEntry`, `CRMEvent`, `test_api_v1_endpoints.py` |
 | REQ-027 | Seguimientos con aprobación | D4 | 4 | P1 | ✅ | `test_security.py::test_follow_up_requires_approval` |
-| REQ-028 | Reporte por correo y dashboard | D8 | 4 | P1 | ⬜ | T-028 |
+| REQ-028 | Reporte por correo y dashboard | D8 | 4 | P1 | ✅ | `test_dashboard_and_email_report.py`, `email_mod/service.py`, `api/reports.py` |
 | REQ-029 | BYOK con presupuesto | D14 | 2 | P0 | ✅ | `test_ai_byok_and_budget.py`, `secrets/ai_service.py` |
 | REQ-030 | Horarios y zona horaria configurables | D13 | 1 | P1 | ✅ | `core/clock.py`, `scheduling/service.py` |
 | REQ-031 | Operación con IDE cerrado | D8 | 1 | P0 | ✅ | `api/execution.py`, `worker.py` ejecutable como proceso background |

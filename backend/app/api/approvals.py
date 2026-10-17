@@ -3,6 +3,7 @@ Router para revisión, aprobación y ciclo de control de candidaturas (REQ-014, 
 Aprobación humana obligatoria, inmutabilidad y programación para el día siguiente.
 """
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -13,6 +14,7 @@ from backend.app.api.deps import get_session, get_tenant_id
 from backend.app.modules.profile.models import UserProfile
 from backend.app.modules.cv.models import MasterCV
 from backend.app.modules.vacancies.models import Vacancy
+from backend.app.modules.vacancies.service import VacancyIntegrityService
 from backend.app.modules.evaluation.models import Evaluation
 from backend.app.modules.approvals.models import Candidacy, Approval, ScheduledTask
 from backend.app.modules.approvals.service import ApprovalService
@@ -70,14 +72,56 @@ async def prepare_candidacy(
     if not vacancy:
         raise HTTPException(status_code=404, detail="Vacante no encontrada.")
 
+    # Reanálisis dinámico en servidor antes de preparar (P1, REQ-009)
+    # Recalcula fecha de cierre contra fecha actual y actualiza la vacante
+    analysis = VacancyIntegrityService.analyze_vacancy(
+        title=vacancy.job_title,
+        description=vacancy.description,
+        source_url=vacancy.source_url or "",
+        salary_min=float(vacancy.salary_min) if vacancy.salary_min else None,
+        salary_max=float(vacancy.salary_max) if vacancy.salary_max else None,
+        salary_currency=vacancy.salary_currency or "USD",
+        closing_date=vacancy.closing_date,
+    )
+    was_inactive = not vacancy.is_active
+    is_closed = was_inactive or analysis["is_closed"]
+    is_fraud_suspect = analysis["is_fraud_suspect"] or any(s.get("severity") == "high" for s in (vacancy.fraud_signals or []))
+
+    # Sincronizar estado en vacante
+    vacancy.is_active = not is_closed
+    # Combinar señales de fraude detectadas
+    existing_signals = {s.get("id"): s for s in (vacancy.fraud_signals or [])}
+    for s in analysis["fraud_signals"]:
+        existing_signals[s["id"]] = s
+    vacancy.fraud_signals = list(existing_signals.values())
+
+    if analysis["closure_reason"]:
+        vacancy.closure_reason = analysis["closure_reason"]
+    elif was_inactive and not vacancy.closure_reason:
+        vacancy.closure_reason = "Vacante inactiva en el sistema."
+    vacancy.last_verified_at = datetime.now(timezone.utc)
+    session.add(vacancy)
+    await session.flush()
+
     # Protección contra fraude y vacantes expiradas (REQ-009)
-    is_fraud_suspect = any(s.get("severity") == "high" for s in (vacancy.fraud_signals or []))
-    if (is_fraud_suspect or not vacancy.is_active) and not payload.force_proceed:
+    if (is_fraud_suspect or is_closed) and not payload.force_proceed:
         reason_str = vacancy.closure_reason or "Señales de fraude de alta gravedad detectadas."
+        await session.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Postulación bloqueada por seguridad: la vacante está cerrada o presenta indicios de fraude ({reason_str}). Para proceder bajo su propio criterio, active force_proceed=true.",
         )
+
+    exception_consent = None
+    if (is_fraud_suspect or is_closed) and payload.force_proceed:
+        exception_consent = {
+            "action": "user_exception_consent",
+            "forced_at": datetime.now(timezone.utc).isoformat(),
+            "reason": analysis["closure_reason"] or "Riesgo de fraude confirmado por usuario",
+            "state_version": vacancy.updated_at.isoformat() if vacancy.updated_at else datetime.now(timezone.utc).isoformat(),
+            "fraud_signals": analysis["fraud_signals"],
+            "is_closed": is_closed,
+        }
 
     if payload.cv_id:
         c_res = await session.execute(
@@ -113,6 +157,7 @@ async def prepare_candidacy(
         vacancy=vacancy,
         evaluation=evaluation,
         cover_letter=payload.cover_letter,
+        exception_consent=exception_consent,
     )
     await session.commit()
     await session.refresh(candidacy)

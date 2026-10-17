@@ -164,6 +164,7 @@
   </header>
 
   <nav>
+    <button data-tab="tab-dashboard" id="nav-tab-dashboard" onclick="switchTab('tab-dashboard')">📊 Dashboard</button>
     <button data-tab="tab-profile" id="nav-tab-profile" class="active" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
     <button data-tab="tab-cv-import" id="nav-tab-cv-import" onclick="switchTab('tab-cv-import')">Importar y Revisar CV</button>
     <button data-tab="tab-master-cvs" id="nav-tab-master-cvs" onclick="switchTab('tab-master-cvs')">CVs Maestros</button>
@@ -283,6 +284,7 @@
           <div style="display: flex; gap: 0.75rem; margin-top: 1rem;">
             <button id="btnUploadCV" class="btn btn-primary" style="flex: 1;" onclick="uploadSelectedCV()" disabled>Subir y Extraer</button>
             <button class="btn btn-outline btn-sm" onclick="toggleRawTextImport()">Pegar Texto</button>
+            <button class="btn btn-outline btn-sm" onclick="toggleGitHubImport()">🐙 GitHub</button>
           </div>
 
           <!-- Barra de progreso visual -->
@@ -305,6 +307,26 @@
             <label>Contenido en Texto Plano</label>
             <textarea id="txtCVRawContent" placeholder="Pega aquí el contenido de tu currículum..." style="height: 120px;"></textarea>
             <button class="btn btn-outline btn-sm" style="margin-top: 0.5rem;" onclick="importRawCVText()">Extraer desde Texto</button>
+          </div>
+
+          <!-- Importación de Proyectos desde GitHub (REQ-003, D12) -->
+          <div id="githubInputContainer" style="display: none; margin-top: 1rem; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 0.375rem; padding: 0.75rem;">
+            <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">Importar Proyectos de GitHub (Permisos Mínimos)</div>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+              Extrae proyectos, lenguajes y tecnologías con estado <strong>pendiente de revisión</strong>. En modo simulación no se realizan llamadas de red externas.
+            </p>
+            <div class="form-group" style="margin-bottom: 0.5rem;">
+              <label style="font-size: 0.75rem;">Usuario u Organización de GitHub</label>
+              <input type="text" id="txtGitHubUsername" placeholder="ej. octocat" style="font-size: 0.85rem;">
+            </div>
+            <div class="form-group" style="margin-bottom: 0.5rem;">
+              <label style="font-size: 0.75rem;">Token de Acceso (Opcional - solo lectura)</label>
+              <input type="password" id="txtGitHubToken" placeholder="ghp_... (opcional)" style="font-size: 0.85rem;">
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button id="btnImportGitHub" class="btn btn-primary btn-sm" onclick="importFromGitHub()">Importar Repositorios</button>
+              <button class="btn btn-outline btn-sm" onclick="toggleGitHubImport()">Cancelar</button>
+            </div>
           </div>
 
           <!-- Historial de Fuentes Importadas -->
@@ -894,7 +916,131 @@
         </table>
       </div>
     </section>
+
+    <!-- TAB 10: DASHBOARD & REPORTES (REQ-028, D8) -->
+    <section id="tab-dashboard" class="tab-content">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <div>
+          <h1 style="margin: 0;">Dashboard & Métricas de Búsqueda Laboral</h1>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">
+            Indicadores consolidados, control de postulaciones programadas y generación de reportes por correo (REQ-028).
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button class="btn btn-primary btn-sm" onclick="openDailyReportModal()">📧 Generar Reporte Diario</button>
+          <button class="btn btn-outline btn-sm" onclick="loadDashboardMetrics()">🔄 Actualizar KPIs</button>
+        </div>
+      </div>
+
+      <!-- Métricas Grid -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Ventana de Despacho (Mañana)</div>
+          <div style="font-size: 2rem; font-weight: 700; color: #10b981; margin-top: 0.5rem;" id="dashKpiScheduled">0</div>
+          <small style="color: var(--text-muted);">Postulaciones programadas</small>
+        </div>
+
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Pendientes de Aprobación</div>
+          <div style="font-size: 2rem; font-weight: 700; color: #f59e0b; margin-top: 0.5rem;" id="dashKpiPendingApproval">0</div>
+          <small style="color: var(--text-muted);">Requieren tu revisión hoy</small>
+        </div>
+
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Enviadas Confirmadas</div>
+          <div style="font-size: 2rem; font-weight: 700; color: #3b82f6; margin-top: 0.5rem;" id="dashKpiSentConfirmed">0</div>
+          <small style="color: var(--text-muted);">Postulaciones ejecutadas con éxito</small>
+        </div>
+
+        <div class="card" style="margin-bottom: 0;">
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Saldo de IA (BYOK)</div>
+          <div style="font-size: 2rem; font-weight: 700; color: #a855f7; margin-top: 0.5rem;" id="dashKpiAIRemaining">$0.00</div>
+          <small style="color: var(--text-muted);" id="dashKpiAIProvider">Proveedor: Ninguno</small>
+        </div>
+      </div>
+
+      <!-- Segunda fila de detalles -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+        <div class="card">
+          <h2>Radar de Vacantes</h2>
+          <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+              <span>Vacantes Activas</span>
+              <strong id="dashVacActive" style="color: #10b981;">0</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+              <span>Sospechosas de Fraude / Riesgo</span>
+              <strong id="dashVacSuspect" style="color: #ef4444;">0</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+              <span>Cerradas o Expiradas</span>
+              <strong id="dashVacClosed" style="color: #64748b;">0</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>Total de Vacantes Rastreadas</span>
+              <strong id="dashVacTotal">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Resumen de Candidaturas CRM</h2>
+          <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+              <span>Total Candidaturas</span>
+              <strong id="dashCandTotal">0</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+              <span>Aprobadas (listas para programar)</span>
+              <strong id="dashCandApproved" style="color: #10b981;">0</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+              <span>Requieren Intervención Humana</span>
+              <strong id="dashCandIntervention" style="color: #ef4444;">0</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>Habilidades Verificadas en Perfil</span>
+              <strong id="dashSkillsVerified" style="color: #3b82f6;">0</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <!-- MODAL: REPORTE DIARIO POR CORREO (REQ-028) -->
+  <div id="modalDailyEmailReport" class="modal-backdrop" style="display: none;">
+    <div class="modal" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; margin-bottom: 1rem;">
+        <h2 style="margin: 0;">Vista Previa de Reporte Diario por Correo (REQ-028)</h2>
+        <button class="btn btn-outline btn-sm" onclick="closeDailyReportModal()">✕ Cerrar</button>
+      </div>
+
+      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid #10b981; border-radius: 0.375rem; padding: 0.6rem 0.8rem; margin-bottom: 1rem; font-size: 0.82rem; color: #34d399;">
+        <strong>Modo Simulación Activo:</strong> El reporte se genera y despacha localmente con trazabilidad completa sin conectarse a servidores SMTP externos ni generar tráfico de red.
+      </div>
+
+      <div class="form-group">
+        <label>Asunto del Correo</label>
+        <input type="text" id="txtEmailReportSubject" readonly style="background: rgba(255, 255, 255, 0.05); font-weight: 600;">
+      </div>
+
+      <div class="form-group">
+        <label>Destinatario</label>
+        <input type="email" id="txtEmailReportRecipient" placeholder="usuario@ejemplo.com">
+      </div>
+
+      <div class="form-group">
+        <label>Cuerpo del Reporte (Texto / Resumen)</label>
+        <textarea id="txtEmailReportBody" style="height: 180px; font-family: monospace; font-size: 0.8rem;" readonly></textarea>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
+        <button class="btn btn-outline btn-sm" onclick="closeDailyReportModal()">Cerrar</button>
+        <button class="btn btn-primary btn-sm" id="btnSendDailyEmailReport" onclick="dispatchDailyEmailReport()">📧 Enviar Reporte (Simulado)</button>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL DE AUTENTICACIÓN -->
   <div id="modalAuth" class="modal-backdrop" style="display: none;">
@@ -1192,6 +1338,7 @@
         targetTab.classList.add("active");
       }
 
+      if (tabId === "tab-dashboard") loadDashboardMetrics();
       if (tabId === "tab-crm") loadCRM();
       if (tabId === "tab-vacancies") loadVacancies();
       if (tabId === "tab-execution") loadTasks();
@@ -2954,7 +3101,119 @@
       }
     }
 
+    // --- REQ-003: Importación de GitHub ---
+    function toggleGitHubImport() {
+      const c = document.getElementById("githubInputContainer");
+      c.style.display = c.style.display === "none" ? "block" : "none";
+    }
+
+    async function importFromGitHub() {
+      const username = document.getElementById("txtGitHubUsername").value.trim();
+      const token = document.getElementById("txtGitHubToken").value.trim() || null;
+      const btn = document.getElementById("btnImportGitHub");
+      if (!username) {
+        showToast("Por favor ingresa un nombre de usuario de GitHub.", true);
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerText = "Importando repositorios...";
+      try {
+        const res = await apiRequest("/api/v1/profile/sources/github/import", {
+          method: "POST",
+          body: JSON.stringify({ username: username, access_token: token, max_repos: 5 })
+        });
+        showToast(`¡Se importaron ${res.repositories_imported} repositorios! Revisa los elementos extraídos abajo.`);
+        document.getElementById("githubInputContainer").style.display = "none";
+        await loadCVImportData();
+      } catch (err) {
+        showToast("Error en importación de GitHub: " + err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Importar Repositorios";
+      }
+    }
+
+    // --- REQ-028: Dashboard y Reporte Diario por Correo ---
+    async function loadDashboardMetrics() {
+      if (!authToken) return;
+      try {
+        const m = await apiRequest("/api/v1/reports/dashboard-metrics");
+        if (!m) return;
+
+        document.getElementById("dashKpiScheduled").innerText = m.execution.scheduled_for_tomorrow;
+        document.getElementById("dashKpiPendingApproval").innerText = m.candidacies.pending_approval;
+        document.getElementById("dashKpiSentConfirmed").innerText = m.candidacies.sent_confirmed;
+
+        if (m.ai_budget && m.ai_budget.configured) {
+          document.getElementById("dashKpiAIRemaining").innerText = `$${Number(m.ai_budget.remaining_budget_usd).toFixed(2)}`;
+          document.getElementById("dashKpiAIProvider").innerText = `${m.ai_budget.provider.toUpperCase()} (${m.ai_budget.model})`;
+        } else {
+          document.getElementById("dashKpiAIRemaining").innerText = "$0.00";
+          document.getElementById("dashKpiAIProvider").innerText = "Sin IA / Modo Determinista";
+        }
+
+        document.getElementById("dashVacActive").innerText = m.vacancies.active;
+        document.getElementById("dashVacSuspect").innerText = m.vacancies.suspect;
+        document.getElementById("dashVacClosed").innerText = m.vacancies.closed;
+        document.getElementById("dashVacTotal").innerText = m.vacancies.total;
+
+        document.getElementById("dashCandTotal").innerText = m.candidacies.total;
+        document.getElementById("dashCandApproved").innerText = m.candidacies.approved;
+        document.getElementById("dashCandIntervention").innerText = m.execution.tasks_requiring_intervention;
+        document.getElementById("dashSkillsVerified").innerText = m.profile.verified_skills;
+      } catch (e) {
+        console.error("Error loading dashboard metrics:", e);
+      }
+    }
+
+    async function openDailyReportModal() {
+      if (!authToken) {
+        showToast("Por favor inicia sesión primero.", true);
+        return;
+      }
+      try {
+        showToast("Generando vista previa del reporte diario...");
+        const report = await apiRequest("/api/v1/reports/daily-email/preview");
+        if (!report) return;
+
+        document.getElementById("txtEmailReportSubject").value = report.subject;
+        document.getElementById("txtEmailReportRecipient").value = report.recipient;
+        document.getElementById("txtEmailReportBody").value = report.text_body;
+
+        document.getElementById("modalDailyEmailReport").style.display = "flex";
+      } catch (err) {
+        showToast("Error al generar reporte: " + err.message, true);
+      }
+    }
+
+    function closeDailyReportModal() {
+      document.getElementById("modalDailyEmailReport").style.display = "none";
+    }
+
+    async function dispatchDailyEmailReport() {
+      const recipient = document.getElementById("txtEmailReportRecipient").value.trim();
+      const btn = document.getElementById("btnSendDailyEmailReport");
+      btn.disabled = true;
+      btn.innerText = "Enviando...";
+
+      try {
+        const res = await apiRequest("/api/v1/reports/daily-email/send", {
+          method: "POST",
+          body: JSON.stringify({ recipient_email: recipient || null })
+        });
+        showToast(res.message || "Reporte despachado exitosamente.");
+        closeDailyReportModal();
+      } catch (err) {
+        showToast("Error al enviar reporte: " + err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "📧 Enviar Reporte (Simulado)";
+      }
+    }
+
     async function loadInitialData() {
+      await loadDashboardMetrics();
       await loadProfileData();
       await loadCVImportData();
       await loadMasterCVsList();

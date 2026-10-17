@@ -4,6 +4,7 @@ Almacena configuraciones de proveedor de IA, presupuesto mensual y consumo regis
 NUNCA almacena claves en texto plano.
 """
 
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import (
     Boolean,
@@ -58,7 +59,7 @@ class APIKeyConfig(Base):
         Boolean, nullable=False, default=True
     )
     billing_period_month: Mapped[str] = mapped_column(
-        String(7), nullable=False, default="2026-10"
+        String(7), nullable=False, default=lambda: datetime.now(timezone.utc).strftime("%Y-%m")
     )
 
 
