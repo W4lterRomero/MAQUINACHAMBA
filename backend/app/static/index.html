@@ -1023,6 +1023,97 @@
     </div>
   </div>
 
+  <!-- MODAL: EVALUACIÓN DE VACANTE (DETERMINISTA / IA BYOK) -->
+  <div id="modalEvaluateVacancy" class="modal-backdrop" style="display: none;">
+    <div class="modal" style="max-width: 750px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; margin-bottom: 1rem;">
+        <h2 id="modalEvalVacTitle" style="margin: 0;">Evaluación de Compatibilidad de Vacante</h2>
+        <button class="btn btn-outline btn-sm" onclick="closeEvaluateVacancyModal()">✕ Cerrar</button>
+      </div>
+
+      <div id="modalEvalVacDetails" style="margin-bottom: 1rem; background: rgba(255, 255, 255, 0.02); padding: 0.75rem; border-radius: 0.375rem; border: 1px solid var(--card-border);">
+        <input type="hidden" id="evalCurrentVacancyId" value="">
+        <div style="font-size: 0.9rem; margin-bottom: 0.25rem;"><strong id="lblEvalCompany">Empresa</strong> — <span id="lblEvalJobTitle" style="color: var(--primary); font-weight: 600;">Puesto</span></div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);" id="lblEvalReqs">Requisitos: -</div>
+      </div>
+
+      <!-- Configuración de Evaluación -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label>CV Maestro a Evaluar</label>
+          <select id="selEvalMasterCv">
+            <!-- Cargado dinámicamente -->
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label>Método de Evaluación</label>
+          <select id="selEvalMode" onchange="toggleEvalAIMode()">
+            <option value="deterministic">Determinista (Reglas locales - Costo $0)</option>
+            <option value="ai">IA BYOK Simulada (Análisis semántico)</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="pnlEvalAISettings" style="display: none; background: rgba(59, 130, 246, 0.06); border: 1px solid var(--accent); border-radius: 0.375rem; padding: 0.6rem; margin-bottom: 1rem; font-size: 0.8rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>Proveedor configurado: <strong id="lblEvalAIProvider">OpenAI</strong> | Modelo: <strong id="lblEvalAIModel">gpt-4o-mini</strong></span>
+          <span style="color: #10b981;">Saldo disponible: <strong id="lblEvalAIRemaining">$10.00</strong></span>
+        </div>
+        <div style="color: var(--text-muted); margin-top: 0.25rem;">
+          Modo simulación activo: se calcularán tokens y costo estimado sin llamadas a red externa.
+        </div>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <button class="btn btn-primary btn-sm" id="btnExecuteEvaluation" onclick="runExecuteEvaluation()">
+          ⚡ Ejecutar Evaluación
+        </button>
+      </div>
+
+      <!-- Resultados de la Evaluación -->
+      <div id="pnlEvalResults" style="display: none; border-top: 1px solid var(--card-border); padding-top: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <div>
+            <span style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted);">Compatibilidad</span>
+            <div style="font-size: 1.5rem; font-weight: 700;" id="lblEvalScore">0%</div>
+          </div>
+          <div id="lblEvalMethodBadge">
+            <!-- Badge: Determinista o Simulación IA -->
+          </div>
+        </div>
+
+        <!-- Desglose de Habilidades -->
+        <div style="margin-bottom: 0.75rem;">
+          <div style="font-size: 0.8rem; font-weight: 600; color: #10b981; margin-bottom: 0.25rem;">Habilidades Coincidentes (Verificadas):</div>
+          <div id="cntEvalMatchedSkills" style="display: flex; flex-wrap: wrap; gap: 0.35rem;"></div>
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+          <div style="font-size: 0.8rem; font-weight: 600; color: #ef4444; margin-bottom: 0.25rem;">Habilidades Faltantes o No Verificadas:</div>
+          <div id="cntEvalMissingSkills" style="display: flex; flex-wrap: wrap; gap: 0.35rem;"></div>
+        </div>
+
+        <!-- Justificación -->
+        <div style="margin-bottom: 0.75rem;">
+          <div style="font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem;">Justificación Explicable:</div>
+          <div id="txtEvalJustification" style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--card-border); padding: 0.6rem; border-radius: 0.375rem; font-size: 0.82rem; line-height: 1.4; color: var(--text);"></div>
+        </div>
+
+        <!-- Costo / Simulación Info -->
+        <div id="pnlEvalCostInfo" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--card-border); padding: 0.5rem; border-radius: 0.375rem; margin-bottom: 1rem; font-size: 0.78rem;">
+        </div>
+
+        <!-- Botón para Proceder a Revisión y Aprobación -->
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+          <button class="btn btn-outline btn-sm" onclick="closeEvaluateVacancyModal()">Cerrar</button>
+          <button class="btn btn-primary btn-sm" id="btnProceedToApproval" onclick="proceedFromEvalToApproval()">
+            Continuar a Revisión de Candidatura →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast">Mensaje</div>
 
   <script>
@@ -1891,32 +1982,180 @@
       `).join("");
     }
 
-    async function evaluateAndPrepare(vacancyId) {
+    let currentEvalVacancy = null;
+    let currentLastEvaluation = null;
+
+    async function openEvaluateVacancyModal(vacancyId) {
+      if (!authToken) return;
       try {
-        const prof = await apiRequest("/api/v1/profile");
-        if (!prof.master_cvs || prof.master_cvs.length === 0) {
-          showToast("Debes crear al menos un CV Maestro en Perfil.", true);
+        const vacancies = await apiRequest("/api/v1/vacancies");
+        currentEvalVacancy = (vacancies || []).find(v => v.id === vacancyId);
+        if (!currentEvalVacancy) {
+          showToast("Vacante no encontrada.", true);
           return;
         }
-        const activeCv = prof.master_cvs.find(c => c.is_active) || prof.master_cvs[0];
-        const cvId = activeCv.id;
-        showToast("Evaluando compatibilidad...");
-        const evalRes = await apiRequest("/api/v1/evaluations", {
+
+        document.getElementById("evalCurrentVacancyId").value = vacancyId;
+        document.getElementById("lblEvalCompany").innerText = currentEvalVacancy.company_name;
+        document.getElementById("lblEvalJobTitle").innerText = currentEvalVacancy.job_title;
+        document.getElementById("lblEvalReqs").innerText = "Requisitos: " + (currentEvalVacancy.requirements && currentEvalVacancy.requirements.length > 0 ? currentEvalVacancy.requirements.join(", ") : "Sin requisitos explícitos");
+
+        // Cargar CVs maestros disponibles
+        const prof = await apiRequest("/api/v1/profile");
+        const cvSelect = document.getElementById("selEvalMasterCv");
+        if (!prof.master_cvs || prof.master_cvs.length === 0) {
+          showToast("Debes crear al menos un CV Maestro antes de evaluar.", true);
+          switchTab("tab-master-cvs");
+          return;
+        }
+
+        cvSelect.innerHTML = prof.master_cvs.map(cv => `
+          <option value="${cv.id}" ${cv.is_active ? "selected" : ""}>${escapeHtml(cv.name)} (${escapeHtml(cv.specialization || "General")})</option>
+        `).join("");
+
+        // Cargar configuración de IA activa
+        try {
+          const aiRes = await apiFetch("/api/v1/ai/config?provider=openai");
+          if (aiRes.ok) {
+            const aiCfg = await aiRes.json();
+            document.getElementById("lblEvalAIProvider").innerText = aiCfg.provider.toUpperCase();
+            document.getElementById("lblEvalAIModel").innerText = aiCfg.model;
+            document.getElementById("lblEvalAIRemaining").innerText = `$${Number(aiCfg.remaining_budget_usd).toFixed(4)} USD`;
+          }
+        } catch (e) {}
+
+        // Ocultar resultados previos
+        document.getElementById("pnlEvalResults").style.display = "none";
+        document.getElementById("selEvalMode").value = "deterministic";
+        document.getElementById("pnlEvalAISettings").style.display = "none";
+
+        document.getElementById("modalEvaluateVacancy").style.display = "flex";
+      } catch (err) {
+        showToast("Error al abrir evaluación: " + err.message, true);
+      }
+    }
+
+    function closeEvaluateVacancyModal() {
+      document.getElementById("modalEvaluateVacancy").style.display = "none";
+    }
+
+    function toggleEvalAIMode() {
+      const mode = document.getElementById("selEvalMode").value;
+      document.getElementById("pnlEvalAISettings").style.display = (mode === "ai") ? "block" : "none";
+    }
+
+    async function runExecuteEvaluation() {
+      const vacancyId = document.getElementById("evalCurrentVacancyId").value;
+      const cvId = document.getElementById("selEvalMasterCv").value;
+      const mode = document.getElementById("selEvalMode").value;
+      const btn = document.getElementById("btnExecuteEvaluation");
+
+      btn.disabled = true;
+      btn.innerText = "Evaluando...";
+
+      try {
+        const payload = {
+          vacancy_id: vacancyId,
+          cv_id: cvId,
+          use_ai: (mode === "ai"),
+          provider: "openai",
+        };
+
+        const res = await apiRequest("/api/v1/evaluations", {
           method: "POST",
-          body: JSON.stringify({ vacancy_id: vacancyId, cv_id: cvId })
+          body: JSON.stringify(payload),
         });
-        
+
+        currentLastEvaluation = res;
+
+        // Mostrar puntaje y recomendación
+        const scorePct = Math.round((res.compatibility_score || 0) * 100);
+        document.getElementById("lblEvalScore").innerText = `${scorePct}% (${escapeHtml(res.recommendation)})`;
+
+        // Badge de método
+        const badgeEl = document.getElementById("lblEvalMethodBadge");
+        const simInfo = res.simulation_info || {};
+
+        if (res.ai_used) {
+          badgeEl.innerHTML = `<span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; font-size: 0.85rem;">🤖 IA Simulada (${escapeHtml(simInfo.provider || 'openai')}/${escapeHtml(simInfo.model || '')})</span>`;
+        } else if (simInfo.is_fallback) {
+          badgeEl.innerHTML = `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; font-size: 0.85rem;">⚡ Alternativa Determinista (Presupuesto o Fallback)</span>`;
+        } else {
+          badgeEl.innerHTML = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; font-size: 0.85rem;">📐 Determinista (Reglas Locales)</span>`;
+        }
+
+        // Habilidades coincidentes
+        const matchedCnt = document.getElementById("cntEvalMatchedSkills");
+        if (res.matched_skills && res.matched_skills.length > 0) {
+          matchedCnt.innerHTML = res.matched_skills.map(m => {
+            const name = typeof m === "string" ? m : m.matched_skill;
+            return `<span style="background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #10b981; padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;">✓ ${escapeHtml(name)} (Verificada)</span>`;
+          }).join("");
+        } else {
+          matchedCnt.innerHTML = `<span style="color: var(--text-muted); font-size: 0.78rem;">Ninguna coincidencia directa encontrada con habilidades verificadas.</span>`;
+        }
+
+        // Habilidades faltantes
+        const missingCnt = document.getElementById("cntEvalMissingSkills");
+        if (res.missing_skills && res.missing_skills.length > 0) {
+          missingCnt.innerHTML = res.missing_skills.map(m => `
+            <span style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #ef4444; padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;">✗ ${escapeHtml(String(m))}</span>
+          `).join("");
+        } else {
+          missingCnt.innerHTML = `<span style="color: var(--text-muted); font-size: 0.78rem;">No se detectaron requerimientos no cubiertos.</span>`;
+        }
+
+        // Justificación
+        document.getElementById("txtEvalJustification").innerText = res.justification || "Sin justificación.";
+
+        // Costo y simulación
+        const costInfoEl = document.getElementById("pnlEvalCostInfo");
+        if (res.ai_used) {
+          costInfoEl.innerHTML = `
+            <strong style="color: #c084fc;">Consumo Simulado:</strong> Tokens In/Out: <strong>${simInfo.tokens_consumed || 0}</strong> | Costo: <strong>$${Number(simInfo.cost_incurred_usd || 0).toFixed(6)} USD</strong> | Saldo restante: <strong>$${Number(simInfo.remaining_budget_usd || 0).toFixed(4)} USD</strong>
+            <div style="color: var(--text-muted); margin-top: 0.2rem; font-size: 0.72rem;">${escapeHtml(simInfo.simulation_banner || '')}</div>
+          `;
+        } else if (simInfo.is_fallback) {
+          costInfoEl.innerHTML = `
+            <strong style="color: #f59e0b;">Alternativa Determinista Activa:</strong> ${escapeHtml(simInfo.fallback_reason || '')} | Costo incurrido: <strong>$0.000000 USD (0 tokens)</strong>.
+          `;
+        } else {
+          costInfoEl.innerHTML = `
+            <strong style="color: #10b981;">Modo Determinista:</strong> Evaluación puramente lógica basada en reglas objetivas sin consumo de tokens ni costo (<strong>$0.000000 USD</strong>).
+          `;
+        }
+
+        document.getElementById("pnlEvalResults").style.display = "block";
+      } catch (err) {
+        showToast("Error en evaluación: " + err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "⚡ Ejecutar Evaluación";
+      }
+    }
+
+    async function proceedFromEvalToApproval() {
+      if (!currentLastEvaluation) return;
+      const vacancyId = document.getElementById("evalCurrentVacancyId").value;
+      const cvId = document.getElementById("selEvalMasterCv").value;
+
+      try {
         showToast("Preparando paquete de postulación...");
         const cand = await apiRequest("/api/v1/candidacies/prepare", {
           method: "POST",
-          body: JSON.stringify({ vacancy_id: vacancyId, cv_id: cvId, evaluation_id: evalRes.id })
+          body: JSON.stringify({ vacancy_id: vacancyId, cv_id: cvId, evaluation_id: currentLastEvaluation.id })
         });
 
+        closeEvaluateVacancyModal();
         inspectCandidacy(cand.id);
-        switchTab('tab-approvals');
+        switchTab("tab-approvals");
       } catch (err) {
-        showToast(err.message, true);
+        showToast("Error al preparar candidatura: " + err.message, true);
       }
+    }
+
+    async function evaluateAndPrepare(vacancyId) {
+      await openEvaluateVacancyModal(vacancyId);
     }
 
     async function inspectCandidacy(candidacyId) {

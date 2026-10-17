@@ -73,10 +73,10 @@ async def get_ai_config(
     config = await ai_service.get_or_create_config(session, tenant_id, provider)
     has_key = vault_service.has_key(tenant_id, provider)
 
-    committed = round(config.current_month_usage_usd, 4)
-    reserved = round(config.reserved_budget_usd, 4)
-    total_consumed = round(committed + reserved, 4)
-    remaining = max(0.0, round(config.monthly_budget_usd - total_consumed, 4))
+    committed = round(config.current_month_usage_usd, 6)
+    reserved = round(config.reserved_budget_usd, 6)
+    total_consumed = round(committed + reserved, 6)
+    remaining = max(0.0, round(config.monthly_budget_usd - total_consumed, 6))
 
     # Determinar nivel de alerta
     if total_consumed >= config.monthly_budget_usd:

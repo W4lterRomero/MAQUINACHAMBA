@@ -337,3 +337,223 @@ async def test_no_plaintext_keys_in_database_or_cost_logs(client: AsyncClient):
         for l in logs:
             assert unique_secret not in str(l.operation or "")
             assert unique_secret not in str(l.model_used or "")
+
+
+@pytest.mark.asyncio
+async def test_work_probe_budget_limit_never_exceeded_on_small_budget(client: AsyncClient):
+    """
+    Sonda exacta de Work sobre commit 2a00f58:
+    Registrar usuario ficticio, configurar openai/gpt-4o con monthly_budget_usd=0.0002,
+    guardar clave ficticia y POST /api/v1/ai/simulate-call con prompt="x", expected_output_tokens=10.
+    Garantía: current_month_usage_usd <= 0.0002 y jamás excede el saldo configurado.
+    """
+    uid = uuid.uuid4().hex[:8]
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"work_probe_{uid}@example.com",
+        "password": "Password123!",
+        "full_name": "Work Probe User",
+    })
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Configurar openai/gpt-4o con monthly_budget_usd=0.0002
+    await client.post("/api/v1/ai/config", headers=headers, json={
+        "provider": "openai",
+        "model": "gpt-4o",
+        "monthly_budget_usd": 0.0002,
+        "is_active": True,
+    })
+
+    # Guardar clave ficticia
+    await client.post("/api/v1/ai/key", headers=headers, json={
+        "provider": "openai",
+        "key_value": "tok_mock_work_probe_1234",
+    })
+
+    # Invocar llamada simulada con prompt="x", expected_output_tokens=10
+    res = await client.post("/api/v1/ai/simulate-call", headers=headers, json={
+        "provider": "openai",
+        "operation": "evaluation",
+        "prompt": "x",
+        "expected_output_tokens": 10,
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["is_fallback"] is False
+    assert data["cost_incurred_usd"] <= 0.0002
+    assert data["output_tokens"] <= 10
+
+    # Consultar config en API y verificar invariante presupuestario
+    cfg_res = await client.get("/api/v1/ai/config?provider=openai", headers=headers)
+    assert cfg_res.status_code == 200
+    cfg_data = cfg_res.json()
+    assert cfg_data["current_month_usage_usd"] <= 0.0002
+    assert cfg_data["remaining_budget_usd"] >= 0.0
+    assert cfg_data["current_month_usage_usd"] == data["cost_incurred_usd"]
+
+
+@pytest.mark.asyncio
+async def test_deterministic_fallback_truthful_and_differentiated():
+    """
+    Garantía de veracidad del fallback determinista (P1):
+    1. 'Sin experiencia ni habilidades' devuelve compatibility_score = 0.0 e insufficient_verified_data (nunca 0.85).
+    2. Perfiles distintos no reciben una puntuación fija del 85%; perfiles con mayor solapamiento obtienen mayor score.
+    3. Para cartas, redacción neutral sin inventar hechos, competencias ni trayectoria profesional.
+    """
+    ai_service = AIService()
+
+    # 1. Sin experiencia ni habilidades
+    res_empty = await ai_service.run_deterministic_fallback(
+        operation="evaluation",
+        prompt_or_context="Candidato sin experiencia ni habilidades previas",
+        fallback_reason="Presupuesto agotado",
+    )
+    data_empty = res_empty["data"]
+    assert data_empty["compatibility_score"] == 0.0
+    assert data_empty["status"] == "insufficient_verified_data"
+    assert data_empty["matched_skills"] == []
+    assert data_empty["compatibility_score"] != 0.85
+
+    # 2. Perfiles distintos obtienen puntuaciones calculadas distintas (no un 85% fijo)
+    res_profile_a = await ai_service.run_deterministic_fallback(
+        operation="evaluation",
+        prompt_or_context="Requisitos: Python, FastAPI, Docker, Kubernetes, SQL. Perfil: Python, FastAPI.",
+        fallback_reason="Sin clave",
+    )
+    res_profile_b = await ai_service.run_deterministic_fallback(
+        operation="evaluation",
+        prompt_or_context="Requisitos: Python, FastAPI, Docker, Kubernetes, SQL. Perfil: Python, FastAPI, Docker, Kubernetes.",
+        fallback_reason="Sin clave",
+    )
+    score_a = res_profile_a["data"]["compatibility_score"]
+    score_b = res_profile_b["data"]["compatibility_score"]
+    assert score_a != 0.85
+    assert score_b != 0.85
+    assert score_a < score_b
+    assert "FastAPI" in str(res_profile_a["data"]["matched_skills"]) or "fastapi" in str(res_profile_a["data"]["matched_skills"])
+
+    # 3. Carta de postulación neutral sin hechos inventados
+    res_letter = await ai_service.run_deterministic_fallback(
+        operation="cover_letter",
+        prompt_or_context="Generar carta para puesto de arquitectura cloud",
+        fallback_reason="Presupuesto agotado",
+    )
+    letter_text = res_letter["data"]["message"]
+    assert "especializado" not in letter_text.lower()
+    assert "trayectoria comprobada" not in letter_text.lower()
+    assert res_letter["data"]["tone"] == "neutral_formal"
+
+
+@pytest.mark.asyncio
+async def test_vacancy_evaluation_with_ai_and_fallback(client: AsyncClient):
+    """
+    Integración de evaluación de vacantes desde API:
+    - Evaluación determinista pura (use_ai=False): costo 0, reglas aplicadas, justificación explicable.
+    - Evaluación con IA simulada (use_ai=True): registro de simulación, costo, tokens, justificación enriquecida.
+    - Fallback cuando el presupuesto se agota: use_ai=True cae a fallback determinista con aviso y costo 0.
+    - Aislamiento entre tenants.
+    """
+    uid_a = uuid.uuid4().hex[:8]
+    reg_a = await client.post("/api/v1/auth/register", json={
+        "email": f"eval_user_{uid_a}@example.com",
+        "password": "Password123!",
+        "full_name": "Eval User A",
+    })
+    token_a = reg_a.json()["access_token"]
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+
+    # Crear perfil y skill verificada
+    await client.post("/api/v1/profile", headers=headers_a, json={
+        "full_name": "Eval User A",
+        "email": f"eval_user_{uid_a}@example.com",
+    })
+    await client.post("/api/v1/profile/skills", headers=headers_a, json={
+        "name": "Python",
+        "category": "technical",
+        "proficiency": "advanced",
+        "years_experience": 4.0,
+        "verification_status": "verified",
+    })
+
+    # Crear CV maestro
+    cv_res = await client.post("/api/v1/profile/cv", headers=headers_a, json={
+        "name": "CV Python Backend",
+        "specialization": "Backend Python",
+        "template_id": "modern_clean",
+        "sections": {"skills": ["Python"]},
+    })
+    assert cv_res.status_code == 201
+    cv_id = cv_res.json()["id"]
+
+    # Crear vacante
+    vac_res = await client.post("/api/v1/vacancies", headers=headers_a, json={
+        "company_name": "Tech Corp",
+        "job_title": "Senior Python Developer",
+        "source_url": "https://example.com/jobs/senior-python",
+        "location": "Remoto",
+        "requirements": ["Python", "Docker"],
+        "description": "Buscamos desarrollador Python con experiencia.",
+    })
+    assert vac_res.status_code == 201
+    vac_id = vac_res.json()["id"]
+
+    # 1. Evaluación 100% determinista (use_ai=False)
+    eval_det = await client.post("/api/v1/evaluations", headers=headers_a, json={
+        "vacancy_id": vac_id,
+        "cv_id": cv_id,
+        "use_ai": False,
+    })
+    assert eval_det.status_code == 201
+    det_data = eval_det.json()
+    assert det_data["ai_used"] is False
+    assert det_data["compatibility_score"] > 0.0
+    assert len(det_data["matched_skills"]) >= 1
+    assert det_data["simulation_info"]["cost_incurred_usd"] == 0.0
+
+    # 2. Configurar IA con presupuesto suficiente y clave
+    await client.post("/api/v1/ai/config", headers=headers_a, json={
+        "provider": "openai",
+        "model": "gpt-4o",
+        "monthly_budget_usd": 5.0,
+        "is_active": True,
+    })
+    await client.post("/api/v1/ai/key", headers=headers_a, json={
+        "provider": "openai",
+        "key_value": "tok_mock_eval_test_key",
+    })
+
+    # 3. Evaluación con IA simulada (use_ai=True)
+    eval_ai = await client.post("/api/v1/evaluations", headers=headers_a, json={
+        "vacancy_id": vac_id,
+        "cv_id": cv_id,
+        "use_ai": True,
+        "provider": "openai",
+    })
+    assert eval_ai.status_code == 201
+    ai_data = eval_ai.json()
+    assert ai_data["ai_used"] is True
+    assert ai_data["simulation_info"]["cost_incurred_usd"] > 0
+    assert ai_data["simulation_info"]["tokens_consumed"] > 0
+    assert "SIMULACIÓN OPENAI" in ai_data["justification"]
+
+    # 4. Agotar presupuesto y comprobar fallback determinista en evaluación
+    await client.post("/api/v1/ai/config", headers=headers_a, json={
+        "provider": "openai",
+        "model": "gpt-4o",
+        "monthly_budget_usd": 0.000001,  # Presupuesto ínfimo ya superado
+        "is_active": True,
+    })
+
+    eval_fallback = await client.post("/api/v1/evaluations", headers=headers_a, json={
+        "vacancy_id": vac_id,
+        "cv_id": cv_id,
+        "use_ai": True,
+        "provider": "openai",
+    })
+    assert eval_fallback.status_code == 201
+    fb_data = eval_fallback.json()
+    assert fb_data["ai_used"] is False
+    assert fb_data["simulation_info"]["is_fallback"] is True
+    assert fb_data["simulation_info"]["cost_incurred_usd"] == 0.0
+    assert "Fallback determinista" in fb_data["justification"]
+

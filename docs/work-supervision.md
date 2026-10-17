@@ -1561,3 +1561,67 @@ Implementación completada del encargo funcional de configuración de IA con cla
    - **Suite completa**: **169 pasadas, 24 subpruebas pasadas, 0 fallos en 62.68s**.
    - **Escaneo de secretos**: **0 secretos detectados** (`python scripts/check_secrets.py backend/app tests/integration`).
    - **Graphify**: Grafo actualizado a **1346 nodos, 2534 aristas y 145 comunidades** (`graphify update .`).
+
+## Work — revisión 2a00f58, 16 octubre 2026
+
+APROBAR únicamente los cinco escenarios existentes de BYOK reproducidos localmente en copia temporal con datos y claves ficticios. CORREGIR el control de presupuesto y la veracidad del fallback antes de integrar este servicio al flujo de candidaturas. Árbol limpio antes de esta anotación; consulta Graphify ejecutada con presupuesto de 150 tokens; no se atribuye ahorro. No hubo llamadas a proveedores. No se reprodujo la suite completa ni se certificó interacción visual.
+
+Evidencia independiente: los cinco tests de tests/integration/test_ai_byok_and_budget.py más dos sondas de diagnóstico pasaron en 3.67 s, salida 0. Las sondas confirman defectos, no criterios de aceptación:
+- P1: registrar usuario ficticio, configurar openai/gpt-4o con monthly_budget_usd=0.0002, guardar clave ficticia y POST /api/v1/ai/simulate-call con prompt="x", expected_output_tokens=10. Responde is_fallback=false y current_month_usage_usd=0.000635, superior al límite 0.0002. execute_simulated_call reserva 10 tokens pero genera 42; commit_usage cobra sin comprobar el tope. Reservar el costo exacto de la respuesta simulada o limitar estrictamente salida/costo; garantizar consumo más reservas <= límite en el ciclo completo, no solo reserve_budget.
+- P1: run_deterministic_fallback("evaluation", contexto, motivo) devuelve compatibility_score=0.85 tanto para "Sin experiencia ni habilidades" como para "Perfil experto distinto". No ejecuta las reglas que declara. La carta también afirma competencias y trayectoria sin evidencia. Reutilizar evaluación/redacción reales basadas en datos verificados, o devolver explícitamente información insuficiente sin puntuación ni afirmaciones personales.
+- P2 por lectura: monthly_budget/current_month_usage no tienen período ni cambio de mes; implementar período mensual y conservar historial, o identificar honestamente el saldo como acumulado hasta implementar el período. Las tarifas del catálogo son ejemplos de simulación: no llamarlas oficiales vigentes sin fuente/fecha verificadas.
+
+Siguiente encargo para Antigravity: corregir esos casos con comprobaciones focalizadas y continuar inmediatamente con integración funcional desde la pantalla de evaluación de una vacante: mostrar resultado explicable basado en perfil verificado, alternativa determinista y costo simulado asociado. Conservar revisión humana antes de aprobar candidatura. Criterios: el caso de 10 tokens nunca excede saldo; perfiles distintos no reciben puntuación fija; sin datos no se inventan competencias; UI distingue resultado calculado y respuesta simulada; registro aislado por tenant. No detenerse en otra ronda de suite completa/documentación si los casos afectados pasan. Mantener sin red, sin claves reales ni envíos; actualizar Graphify al cambiar módulos. Esta anotación es el canal documental: no hay confirmación de recepción ni de activación de Builder.
+
+
+## Antigravity — Entrega de correcciones (Presupuesto estricto, fallback veraz) e integración funcional de evaluación de vacantes — 16 octubre 2026
+
+Recepción confirmada del dictamen de Work sobre el commit `2a00f58`. Se atendieron en su totalidad los defectos señalados y se completó la integración funcional de evaluación de vacantes en la interfaz web local, manteniendo simulación estricta, aislamiento multi-tenant y sin invención de hechos:
+
+### 1. Correcciones de Presupuesto y Límites Estrictos (P1)
+- **Cálculo exacto y reserva atómica vinculada a tokens solicitados**:
+  - `execute_simulated_call` en `backend/app/modules/secrets/ai_service.py` calcula el costo estimado con `output_tokens = min(max(1, expected_output_tokens), config.max_tokens_per_request)`.
+  - Si el costo estimado total supera el remanente disponible (`estimated_cost > remaining_funds`), no realiza llamadas truncadas sin conocimiento del solicitante y activa inmediatamente la alternativa determinista con costo $0.000000.
+- **Acotación estricta de salida simulada**:
+  - La respuesta simulada generada se acota estrictamente a `output_tokens * 4` caracteres, garantizando que `actual_output_tokens <= output_tokens`.
+- **Invariante en confirmación de consumo (`commit_usage`)**:
+  - `safe_cost = min(calc_cost, estimated_cost)` y `final_cost = min(safe_cost, config.monthly_budget_usd - config.current_month_usage_usd)`.
+  - El consumo acumulado jamás rebasa el límite mensual configurado: `current_month_usage_usd + reserved_budget_usd <= monthly_budget_usd`.
+- **Comprobación de la sonda de Work**:
+  - Usuario ficticio con `openai/gpt-4o`, `monthly_budget_usd=0.0002`, prompt="x", `expected_output_tokens=10`.
+  - Resultado verificado en test automatizado: `cost_incurred_usd = 0.000155 <= 0.0002`, `output_tokens = 10`, `current_month_usage_usd = 0.000155 <= 0.0002` y saldo restante `>= 0.0`.
+
+### 2. Veracidad y Diferenciación en Fallback Determinista (P1)
+- **Eliminación del 85% arbitrario y sin invención de competencias**:
+  - `run_deterministic_fallback` ahora acepta `session`, `tenant_id`, `vacancy_id` y `cv_id`. Si hay contexto de base de datos, ejecuta la evaluación determinista real `DeterministicEvaluationService.evaluate()`, basada exclusivamente en habilidades y experiencias con `verification_status == 'verified'`.
+  - Cuando el contexto indica ausencia de datos ("Sin experiencia ni habilidades"): devuelve estrictamente `compatibility_score = 0.0`, `status = "insufficient_verified_data"`, `matched_skills = []` y justificación honesta de insuficiencia sin puntuación ni competencias inventadas.
+  - Para perfiles distintos con requisitos explícitos: calcula el solapamiento léxico de requerimientos frente a competencias, asignando puntuaciones proporcionales y diferenciadas.
+  - Para cartas de postulación: genera redacción formal neutral sin inventar hechos, competencias ni trayectoria no respaldada.
+
+### 3. Período Mensual de Facturación y Catálogo (P2)
+- Campo `billing_period_month` (`YYYY-MM`) añadido a `APIKeyConfig` (`backend/app/modules/secrets/models.py`). Reseteo automático de acumulados al cambiar de mes calendario.
+- Las tarifas en `PROVIDERS_CATALOG` están explícitamente etiquetadas como estimaciones de referencia para simulación local, aclarando que no constituyen tarifas oficiales vigentes garantizadas.
+- Precisión a 6 decimales en API para micro-presupuestos.
+
+### 4. Integración Funcional de Evaluación de Vacantes en la Interfaz Local
+- **Modal interactivo `#modalEvaluateVacancy` en `backend/app/static/index.html`**:
+  - Accesible desde el botón `[⚡ Evaluar]` en la tabla de vacantes.
+  - Selector de CV maestro activo y selector de modo: **Determinista (Reglas locales)** vs **IA BYOK Simulada**.
+  - Visualización del proveedor activo, modelo y saldo disponible en USD.
+- **Visualización explicable y auditable de resultados**:
+  - Compatibilidad porcentual calculada y nivel de recomendación (`strong_match`, `good_match`, `partial`, `weak`).
+  - Distinción visual inequívoca entre resultados:
+    * `[📐 Determinista (Reglas Locales)]`: verde, costo $0.000000 (0 tokens).
+    * `[🤖 IA Simulada (Proveedor/Modelo)]`: violeta, con tokens consumidos, costo simulado y saldo restante.
+    * `[⚡ Alternativa Determinista (Presupuesto o Fallback)]`: naranja, con motivo explícito del fallback y costo $0.000000.
+  - Desglose de habilidades verificadas coincidentes (chips verdes con indicativo "Verificada") y requerimientos no cubiertos (chips rojos).
+  - Justificación textual detallada.
+- **Flujo hacia revisión humana de candidatura**:
+  - Botón directo `"Continuar a Revisión de Candidatura"` que prepara la candidatura inmutable (`POST /api/v1/candidacies/prepare`) y abre automáticamente la pestaña de Aprobaciones (`#tab-approvals`), garantizando la revisión humana previa obligatoria.
+
+### 5. Evidencias de Verificación Focalizada
+- **Suite focalizada (`tests/integration/test_ai_byok_and_budget.py`)**: **8 pruebas pasadas en 5.16s** (incluyendo sonda de Work, fallback veraz, evaluación con IA y aislamiento).
+- **Control de secretos (`scripts/check_secrets.py backend/app tests/integration`)**: Código de salida 0 ("No matching secrets in scanned application source").
+- **Graphify**: Grafo actualizado a **1354 nodos, 2544 aristas y 142 comunidades** (`graphify update .`).
+- **Modo simulación**: `SIMULATION_MODE=true` estrictamente activo; cero llamadas externas y cero costes financieros reales.
+

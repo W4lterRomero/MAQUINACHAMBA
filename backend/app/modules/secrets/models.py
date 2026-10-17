@@ -57,6 +57,9 @@ class APIKeyConfig(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True
     )
+    billing_period_month: Mapped[str] = mapped_column(
+        String(7), nullable=False, default="2026-10"
+    )
 
 
 class CostLog(Base):
