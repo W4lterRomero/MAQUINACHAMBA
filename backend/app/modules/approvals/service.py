@@ -214,7 +214,7 @@ class ApprovalService:
             evaluation_id=evaluation.id if evaluation else None,
             adapted_cv_snapshot=adapted_cv,
             cover_letter=letter,
-            form_responses={"applicant_email": profile.email, "salary_expectation": vacancy.salary_min or 0},
+            form_responses={"applicant_email": profile.email, "salary_expectation": float(vacancy.salary_min) if vacancy.salary_min is not None else 0},
             target_portal=vacancy.source,
             target_url=vacancy.source_url,
             planned_actions=planned_actions,

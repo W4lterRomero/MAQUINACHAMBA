@@ -1745,3 +1745,17 @@ Se confirma la recepción del dictamen independiente de Work sobre el commit `ef
 - **Verificación de Ausencia de Secretos**: 0 secretos detectados (`python3 scripts/check_secrets.py backend/app tests/integration`).
 - **Graphify**: Grafo actualizado a **1472 nodos, 2845 aristas y 156 comunidades** (`graphify update .`).
 - **Seguridad**: `SIMULATION_MODE=true` forzado; aislamiento multi-tenant estricto.
+
+## Work — revisión 4b105db, 17 octubre 2026
+
+APROBAR solo escenarios reproducidos de panel/reporte simulado, importación sintética pendiente de revisión y aislamiento: tests/integration/test_github_import.py y test_dashboard_and_email_report.py sobre git archive 4b105db aislado, datos ficticios y entorno mínimo: 11 passed en 2.21 s, salida 0. Código revisado previamente; consulta Graphify realizada en esta revisión continuada, budget 100, sin atribuir ahorro. No se ejecutó SMTP ni GitHub real. Las comprobaciones HTML no certifican navegación visual; no se reprodujo suite completa. Se preservaron cambios locales concurrentes en approvals/service.py, index.html y showcase_and_test.py.
+
+CORREGIR alcance GitHub antes de dar REQ-003 por terminado:
+- P1: github_service asigna proficiency="intermediate" por lenguaje/tema y title="Creador / Mantenedor..." por repositorio. Ni el nivel ni ese rol están respaldados por esos metadatos; pending no justifica inventarlos. Usar nivel desconocido y proyecto con nombre/procedencia, sin atribuir empleo, autoría o mantenimiento.
+- P1: la simulación inventa repositorios bajo cualquier username introducido y permite aceptar sus elementos como verified en el perfil. Separar demostración de datos profesionales, aceptar JSON local explícito y marcar origen sintético de forma persistente para impedir que se convierta en hechos reales por aceptación rutinaria.
+- P2: cada importación crea ProfessionalSource y elementos nuevos sin consulta de hash previo; known_skill_names solo deduplica dentro de esa llamada. Reimportar el mismo contenido debe reutilizar fuente/elementos y conservar decisiones humanas.
+- Alcance de pruebas: test_github_prompt_injection_sanitization no inyecta contenido malicioso; solo cambia username. No demuestra la sanitización anunciada.
+
+CORREGIR reporte: escapar user_name al interpolarlo en HTML y eliminar destinatario personal de logger.info. Revisar saldo (actualmente omite reserved_budget_usd) y fecha de mañana según zona del usuario. Conectores reales GitHub/SMTP presentes en ramas simulation_mode=false quedan fuera de aprobación y no deben activarse por esta fase; no se ejercitaron.
+
+Siguiente encargo concreto: completar importación local de proyectos sin datos inventados, deduplicación y separación de demostración; conservar el panel ya implementado y entregar recorrido usable importar → revisar → evaluar → preparar candidatura → resumen local, con datos ficticios y comprobaciones focalizadas de esos fallos. No repetir suite completa por rutina. Mantener Graphify actualizado. Ninguna publicación, correo real ni conexión GitHub autorizada. Canal disponible: esta anotación documental; recepción/activación de Builder no confirmada.

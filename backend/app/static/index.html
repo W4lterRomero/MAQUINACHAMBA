@@ -1338,6 +1338,12 @@
         targetTab.classList.add("active");
       }
 
+      if (window.history && window.history.replaceState) {
+        const url = new URL(window.location);
+        url.searchParams.set("tab", tabId);
+        window.history.replaceState({}, "", url);
+      }
+
       if (tabId === "tab-dashboard") loadDashboardMetrics();
       if (tabId === "tab-crm") loadCRM();
       if (tabId === "tab-vacancies") loadVacancies();
@@ -3227,7 +3233,12 @@
     window.addEventListener("DOMContentLoaded", async () => {
       await checkAuthStatus();
       if (authToken) {
-        loadInitialData();
+        await loadInitialData();
+        const urlParams = new URLSearchParams(window.location.search);
+        const requestedTab = urlParams.get("tab") || (window.location.hash ? window.location.hash.substring(1) : "");
+        if (requestedTab) {
+          switchTab(requestedTab);
+        }
       } else {
         toggleAuthModal(true);
       }
