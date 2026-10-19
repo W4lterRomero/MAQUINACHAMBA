@@ -5,7 +5,7 @@ Aprobación humana obligatoria, inmutabilidad y programación para el día sigui
 
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from backend.app.modules.vacancies.service import VacancyIntegrityService
 from backend.app.modules.evaluation.models import Evaluation
 from backend.app.modules.approvals.models import Candidacy, Approval, ScheduledTask
 from backend.app.modules.approvals.service import ApprovalService
+from backend.app.modules.approvals.pipeline import AutoApprovalPipeline
 
 router = APIRouter(prefix="/candidacies", tags=["Candidacies & Approvals"])
 
@@ -31,8 +32,16 @@ class PrepareCandidacyRequest(BaseModel):
 
 
 class ApproveCandidacyRequest(BaseModel):
-    user_timezone: str = "America/Mexico_City"
+    user_timezone: str = "America/El_Salvador"
     notes: Optional[str] = None
+
+
+class PostponeCandidacyRequest(BaseModel):
+    notes: Optional[str] = None
+
+
+class AutoPreparePipelineRequest(BaseModel):
+    min_score_threshold: float = 0.60
 
 
 class RejectCandidacyRequest(BaseModel):
@@ -178,6 +187,122 @@ async def prepare_candidacy(
         },
         "cover_letter_preview": candidacy.cover_letter[:150] + "...",
     }
+
+
+@router.get("/inbox")
+async def get_candidacies_inbox(
+    status_filter: Optional[str] = Query(None, description="Filtrar por estado"),
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    TAREA 3.4: Bandeja nocturna de aprobación.
+    Devuelve las tarjetas enriquecidas con empresa, puesto, URL original, fuentes,
+    compatibilidad, requisitos coincidentes/faltantes, CV y documentos, mensaje y riesgos.
+    """
+    query = select(Candidacy).where(Candidacy.tenant_id == tenant_id)
+    if status_filter:
+        query = query.where(Candidacy.status == status_filter)
+
+    cands_res = await session.execute(query.order_by(Candidacy.created_at.desc()))
+    candidacies = cands_res.scalars().all()
+
+    inbox_cards = []
+    for c in candidacies:
+        # Vacante asociada
+        v_res = await session.execute(
+            select(Vacancy).where(Vacancy.id == c.vacancy_id, Vacancy.tenant_id == tenant_id)
+        )
+        vac = v_res.scalar_one_or_none()
+
+        # CV Maestro
+        cv_res = await session.execute(
+            select(MasterCV).where(MasterCV.id == c.cv_id, MasterCV.tenant_id == tenant_id)
+        )
+        master_cv = cv_res.scalar_one_or_none()
+
+        # Evaluación
+        ev_res = await session.execute(
+            select(Evaluation).where(Evaluation.id == c.evaluation_id, Evaluation.tenant_id == tenant_id)
+        )
+        eval_obj = ev_res.scalar_one_or_none()
+
+        # Aprobación activa
+        app_res = await session.execute(
+            select(Approval).where(
+                Approval.candidacy_id == c.id,
+                Approval.tenant_id == tenant_id,
+                Approval.decision == "approved",
+                Approval.invalidated_at.is_(None),
+            )
+        )
+        active_app = app_res.scalar_one_or_none()
+
+        # Tarea programada
+        task_res = await session.execute(
+            select(ScheduledTask).where(
+                ScheduledTask.candidacy_id == c.id,
+                ScheduledTask.tenant_id == tenant_id,
+            )
+        )
+        task = task_res.scalars().first()
+
+        # Riesgos y advertencias
+        risks = []
+        if vac:
+            if vac.fraud_signals:
+                for sig in vac.fraud_signals:
+                    risks.append(f"Alerta de Fraude: {sig.get('title', 'Sospechoso')}")
+            if vac.allowed_countries:
+                risks.append(f"Restricción Geográfica: Países autorizados: {', '.join(vac.allowed_countries)}")
+            if not vac.is_active:
+                risks.append(f"Vacante Inactiva/Cerrada: {vac.closure_reason or 'No disponible'}")
+
+        # Documentos disponibles
+        snap = c.adapted_cv_snapshot or {}
+        doc_hashes = snap.get("document_hashes") or {}
+
+        # Procedencia
+        source_label = vac.source if vac else "manual"
+        sources_detail = vac.sources_detail if vac else []
+
+        inbox_cards.append({
+            "id": c.id,
+            "version": c.version,
+            "status": c.status,
+            "company_name": vac.company_name if vac else "Empresa",
+            "job_title": vac.job_title if vac else "Puesto",
+            "source_url": c.target_url or (vac.source_url if vac else ""),
+            "source": source_label,
+            "sources_detail": sources_detail,
+            "compatibility_score": eval_obj.compatibility_score if eval_obj else 0.50,
+            "recommendation": eval_obj.recommendation if eval_obj else "unknown",
+            "justification": eval_obj.justification if eval_obj else "Evaluación no disponible",
+            "matched_skills": eval_obj.matched_skills if eval_obj else [],
+            "missing_skills": eval_obj.missing_skills if eval_obj else [],
+            "selected_cv": {
+                "id": master_cv.id if master_cv else c.cv_id,
+                "name": master_cv.name if master_cv else "CV Maestro",
+                "specialization": master_cv.specialization if master_cv else "",
+            },
+            "documents": {
+                "pdf_url": f"/api/v1/candidacies/{c.id}/export/pdf",
+                "docx_url": f"/api/v1/candidacies/{c.id}/export/docx",
+                "hashes": doc_hashes,
+            },
+            "cover_letter": c.cover_letter,
+            "risks": risks,
+            "is_approved": (active_app is not None),
+            "approval_hash": active_app.content_hash if active_app else None,
+            "scheduled_task": {
+                "id": task.id,
+                "scheduled_date": task.scheduled_date.isoformat(),
+                "status": task.status,
+            } if task else None,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+
+    return inbox_cards
 
 
 @router.get("/{candidacy_id}")
@@ -396,5 +521,56 @@ async def export_candidacy_cv(
         raise HTTPException(status_code=409, detail=str(e))
     except CVServiceError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/pipeline/auto-prepare", status_code=status.HTTP_200_OK)
+async def auto_prepare_pipeline(
+    payload: AutoPreparePipelineRequest = AutoPreparePipelineRequest(),
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    TAREA 3: Orquesta la preparación automática de candidaturas.
+    Evalúa deterministamente las vacantes descubiertas, selecciona el CV maestro
+    más adecuado, genera documentos PDF/DOCX y llena la bandeja de aprobación.
+    """
+    res = await AutoApprovalPipeline.run_pipeline_for_vacancies(
+        session=session,
+        tenant_id=tenant_id,
+        min_score_threshold=payload.min_score_threshold,
+    )
+    return res
+
+
+@router.post("/{candidacy_id}/postpone", status_code=status.HTTP_200_OK)
+async def postpone_candidacy(
+    candidacy_id: str,
+    payload: PostponeCandidacyRequest = PostponeCandidacyRequest(),
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    TAREA 3.4: Posponer candidatura para posterior revisión.
+    Mantiene la candidatura en la bandeja sin programarla para envío.
+    """
+    try:
+        candidacy = await ApprovalService.postpone_candidacy(
+            session=session,
+            tenant_id=tenant_id,
+            candidacy_id=candidacy_id,
+            notes=payload.notes,
+        )
+        await session.commit()
+        return {
+            "status": "postponed",
+            "candidacy_id": candidacy.id,
+            "current_status": candidacy.status,
+            "message": "Candidatura pospuesta. Se mantiene disponible en la bandeja para revisión posterior.",
+        }
+    except ValueError as exc:
+        if "no encontrada" in str(exc).lower():
+            raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc))
+
 
 

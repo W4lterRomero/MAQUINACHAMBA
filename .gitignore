@@ -63,3 +63,7 @@ coverage.xml
 *.pdf
 *.docx
 !docs/**/*.md
+
+# Runtime PIDs and local process logs
+.pids/
+

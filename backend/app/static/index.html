@@ -585,9 +585,61 @@
 
     <!-- TAB 2: VACANTES -->
     <section id="tab-vacancies" class="tab-content">
-      <div class="grid">
-        <div class="card" style="max-width: 450px;">
-          <h2>Importar Vacante de Empleo</h2>
+      <div class="grid" style="margin-bottom: 1.5rem;">
+        <!-- Ingestión Multifuente ChatGPT & Gemini -->
+        <div class="card" style="flex: 1.5;">
+          <h2>📥 Ingestión Multifuente: ChatGPT & Gemini</h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+            Pega los reportes diarios generados por ChatGPT o Gemini (en Markdown, texto, listas o tablas) o carga un archivo (.txt, .md, .json, .csv). El sistema normalizará los campos y deduplicará automáticamente por URL limpia.
+          </p>
+          <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
+            <div style="flex: 1;">
+              <label>Proveedor</label>
+              <select id="selImportProvider">
+                <option value="chatgpt">🤖 ChatGPT Daily Job Search</option>
+                <option value="gemini">✨ Gemini Daily Job Search</option>
+                <option value="general_report">📑 Reporte General / Multi-fuente</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label>Formato de Entrada</label>
+              <select id="selImportFormat">
+                <option value="auto">Detección Automática (Markdown / Tablas / Listas / JSON / CSV)</option>
+                <option value="markdown">Markdown / Texto estructurado</option>
+                <option value="json">JSON</option>
+                <option value="csv">CSV</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Contenido del Reporte</label>
+            <textarea id="txtUniversalContent" style="min-height: 120px;" placeholder="Pega aquí el reporte de ChatGPT o Gemini...
+Ejemplo:
+### 1. Senior Backend Engineer — NovaTech
+- Empresa: NovaTech
+- URL: https://novatech.io/jobs/senior-backend
+- Ubicación: Remoto (LATAM)
+- Salario: $5,000 USD
+- Requisitos: Python, FastAPI, Docker"></textarea>
+          </div>
+          <div style="display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <label class="btn btn-outline btn-sm" style="margin: 0; cursor: pointer;">
+                📁 Subir Archivo (.md, .txt, .json, .csv)
+                <input type="file" id="fileUniversalImport" accept=".txt,.md,.markdown,.json,.csv" style="display: none;" onchange="handleFileUpload(event)">
+              </label>
+              <span id="lblUploadedFileName" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button class="btn btn-outline btn-sm" onclick="syncEmailPrompt()">📧 Sincronizar Correo</button>
+              <button class="btn btn-primary" onclick="submitUniversalImport()">⚡ Ingerir y Normalizar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Registro manual individual -->
+        <div class="card" style="flex: 1; max-width: 420px;">
+          <h2>➕ Registro Manual Rápido</h2>
           <form id="frmVacancy" onsubmit="importVacancy(event)">
             <div class="form-group">
               <label>Empresa</label>
@@ -598,7 +650,7 @@
               <input type="text" id="vacTitle" required placeholder="Senior Backend Engineer">
             </div>
             <div class="form-group">
-              <label>URL Original (Protegida anti-SSRF)</label>
+              <label>URL Original (Protegida)</label>
               <input type="url" id="vacUrl" required placeholder="https://careers.techcorp.com/job/42">
             </div>
             <div class="form-group">
@@ -613,24 +665,60 @@
               <label>Fecha de Cierre (Opcional)</label>
               <input type="date" id="vacClosingDate">
             </div>
-            <button type="submit" class="btn btn-primary">Registrar Vacante</button>
+            <button type="submit" class="btn btn-outline" style="width: 100%;">Registrar Vacante Manual</button>
           </form>
         </div>
+      </div>
 
-        <div class="card" style="flex: 2;">
-          <h2>Vacantes Registradas</h2>
+      <!-- Historial de Lotes de Importación -->
+      <div class="card" style="margin-bottom: 1.5rem;" id="cardImportBatches">
+        <h2>📋 Historial de Ingestiones Diarias (ChatGPT & Gemini)</h2>
+        <div style="overflow-x: auto;">
+          <table id="tblImportBatches">
+            <thead>
+              <tr>
+                <th>Fecha y Hora</th>
+                <th>Proveedor</th>
+                <th>Tipo</th>
+                <th>Encontradas</th>
+                <th>Importadas</th>
+                <th>Deduplicadas</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Sin lotes registrados todavía.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Vacantes Registradas con Filtro de Fuentes -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <h2>Oportunidades Registradas</h2>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <span style="font-size: 0.85rem; color: var(--text-muted);">Filtrar Fuente:</span>
+            <button class="btn btn-outline btn-sm active" id="btnFilterSrcAll" onclick="filterVacanciesBySource('all')">Todas</button>
+            <button class="btn btn-outline btn-sm" id="btnFilterSrcChatgpt" onclick="filterVacanciesBySource('chatgpt')">🤖 Solo ChatGPT</button>
+            <button class="btn btn-outline btn-sm" id="btnFilterSrcGemini" onclick="filterVacanciesBySource('gemini')">✨ Solo Gemini</button>
+            <button class="btn btn-outline btn-sm" id="btnFilterSrcBoth" onclick="filterVacanciesBySource('both')">⚡ Encontradas en Ambos</button>
+          </div>
+        </div>
+        <div style="overflow-x: auto;">
           <table id="tblVacancies">
             <thead>
               <tr>
                 <th>Puesto / Empresa</th>
+                <th>Fuente(s)</th>
                 <th>Estado</th>
                 <th>URL Origen</th>
-                <th>Requisitos</th>
+                <th>Requisitos Técnicos</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Sin vacantes importadas.</td></tr>
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Sin vacantes importadas.</td></tr>
             </tbody>
           </table>
         </div>
@@ -640,13 +728,38 @@
     <!-- TAB 3: APROBACIONES -->
     <section id="tab-approvals" class="tab-content">
       <div class="card" style="margin-bottom: 1.5rem;">
-        <h2>Revisión Humana Obligatoria (Aprobar hoy, ejecutar mañana)</h2>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
-          Conforme a las reglas del sistema, cada postulación requiere la inspección humana de la vacante, el CV adaptado y la carta antes de autorizarse. Toda aprobación genera una huella SHA-256 inmutable y programa la ejecución para el día siguiente.
-        </p>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 1rem; margin-bottom: 1rem;">
+          <div>
+            <h2 style="border: none; padding: 0; margin-bottom: 0.35rem;">🌙 Bandeja de Aprobación Nocturna (Aprobar hoy, ejecutar mañana)</h2>
+            <p style="color: var(--text-muted); font-size: 0.875rem;">
+              Revisa las candidaturas preparadas automáticamente durante el día. Cada postulación aprobada programa su envío simulado para mañana en horario hábil (<strong style="color: #60a5fa;">America/El_Salvador</strong>). Toda edición invalida la aprobación previa.
+            </p>
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 0.35rem; background: #0f172a; padding: 0.3rem 0.6rem; border-radius: 0.375rem; border: 1px solid var(--card-border);">
+              <label style="margin: 0; font-size: 0.8rem;">Umbral Afinidad:</label>
+              <select id="selAutoPrepareThreshold" style="padding: 0.2rem 0.4rem; font-size: 0.8rem; width: auto;">
+                <option value="0.55">55% (Flexible)</option>
+                <option value="0.65" selected>65% (Recomendado)</option>
+                <option value="0.75">75% (Exigente)</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="runAutoPipelineFromUI()">⚡ Preparar Automáticamente</button>
+            <button class="btn btn-outline btn-sm" onclick="loadApprovalInbox()">🔄 Refrescar</button>
+          </div>
+        </div>
+
+        <!-- Filtros de Bandeja -->
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; flex-wrap: wrap;">
+          <button class="btn btn-outline btn-sm active" id="btnFilterInboxPending" onclick="filterInboxByStatus('pending_approval')">⏳ Pendientes de Aprobación</button>
+          <button class="btn btn-outline btn-sm" id="btnFilterInboxApproved" onclick="filterInboxByStatus('approved')">✅ Aprobadas (Programadas)</button>
+          <button class="btn btn-outline btn-sm" id="btnFilterInboxPostponed" onclick="filterInboxByStatus('postponed')">⏸️ Pospuestas</button>
+          <button class="btn btn-outline btn-sm" id="btnFilterInboxAll" onclick="filterInboxByStatus(null)">Todas</button>
+        </div>
+
         <div id="candidacyReviewContainer">
-          <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
-            Selecciona una vacante en la pestaña anterior y haz clic en "Evaluar y Revisar" para iniciar la revisión.
+          <div style="text-align: center; color: var(--text-muted); padding: 3rem 1rem;">
+            Cargando bandeja de aprobación...
           </div>
         </div>
       </div>
@@ -1346,7 +1459,8 @@
 
       if (tabId === "tab-dashboard") loadDashboardMetrics();
       if (tabId === "tab-crm") loadCRM();
-      if (tabId === "tab-vacancies") loadVacancies();
+      if (tabId === "tab-vacancies") { loadVacancies(); loadImportBatches(); }
+      if (tabId === "tab-approvals") loadApprovalInbox();
       if (tabId === "tab-execution") loadTasks();
       if (tabId === "tab-cv-import") loadCVImportData();
       if (tabId === "tab-master-cvs") { loadMasterCVsList(); loadVerifiedSkillsForForm(); }
@@ -2091,8 +2205,8 @@
             ${expHtml}
           </div>
           <div style="display: flex; gap: 0.5rem; border-top: 1px solid var(--card-border); padding-top: 1rem; justify-content: flex-end;">
-            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/profile/cv/${cv.id}/export/pdf', '${cv.name}.pdf')">📄 Descargar PDF</button>
-            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/profile/cv/${cv.id}/export/docx', '${cv.name}.docx')">📝 Descargar DOCX</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/profile/cv/${cv.id}/export/pdf', '${cv.name}.pdf')">📄 Descargar CV (PDF)</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/profile/cv/${cv.id}/export/docx', '${cv.name}.docx')">📝 Descargar CV (DOCX)</button>
           </div>
         `;
 
@@ -2135,15 +2249,47 @@
       }
     }
 
+    let allLoadedVacancies = [];
+    let currentSourceFilter = "all";
+
     async function loadVacancies() {
       if (!authToken) return;
       const vacancies = await apiRequest("/api/v1/vacancies");
+      allLoadedVacancies = vacancies || [];
+      renderVacanciesTable();
+    }
+
+    function filterVacanciesBySource(src) {
+      currentSourceFilter = src;
+      ["all", "chatgpt", "gemini", "both"].forEach(s => {
+        const btnId = "btnFilterSrc" + s.charAt(0).toUpperCase() + s.slice(1);
+        const btn = document.getElementById(btnId);
+        if (btn) {
+          if (s === src) btn.classList.add("active");
+          else btn.classList.remove("active");
+        }
+      });
+      renderVacanciesTable();
+    }
+
+    function renderVacanciesTable() {
       const tb = document.querySelector("#tblVacancies tbody");
-      if (!vacancies || vacancies.length === 0) {
-        tb.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Sin vacantes registradas.</td></tr>';
+      if (!tb) return;
+      let list = allLoadedVacancies;
+      if (currentSourceFilter === "chatgpt") {
+        list = list.filter(v => v.source === "chatgpt");
+      } else if (currentSourceFilter === "gemini") {
+        list = list.filter(v => v.source === "gemini");
+      } else if (currentSourceFilter === "both") {
+        list = list.filter(v => v.source === "both");
+      }
+
+      if (!list || list.length === 0) {
+        tb.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Sin vacantes para el filtro seleccionado.</td></tr>';
         return;
       }
-      tb.innerHTML = vacancies.map(v => {
+
+      tb.innerHTML = list.map(v => {
         let statusBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">✓ Activa</span>`;
         if (v.is_fraud_suspect) {
           const titles = (v.fraud_signals || []).map(s => escapeHtml(s.title)).join(" | ");
@@ -2152,21 +2298,122 @@
           statusBadge = `<span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8;" title="${escapeHtml(v.closure_reason || 'Cerrada')}">🚫 Cerrada</span>`;
         }
 
+        let sourceBadge = `<span class="badge" style="background: #334155; color: #cbd5e1;">Manual</span>`;
+        if (v.source === "both") {
+          sourceBadge = `<span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c084fc; border: 1px solid #a855f7;" title="Encontrada simultáneamente por ChatGPT y Gemini">⚡ Ambos</span>`;
+        } else if (v.source === "chatgpt") {
+          sourceBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981;">🤖 ChatGPT</span>`;
+        } else if (v.source === "gemini") {
+          sourceBadge = `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6;">✨ Gemini</span>`;
+        }
+
+        const reqsText = (v.technical_requirements && v.technical_requirements.length > 0)
+          ? v.technical_requirements.map(escapeHtml).join(", ")
+          : ((v.requirements || []).map(escapeHtml).join(", ") || "-");
+
         return `
           <tr>
-            <td><strong>${escapeHtml(v.job_title)}</strong><br><span style="color: var(--text-muted);">${escapeHtml(v.company_name)}</span></td>
+            <td>
+              <strong>${escapeHtml(v.job_title)}</strong><br>
+              <span style="color: var(--text-muted); font-size: 0.85rem;">${escapeHtml(v.company_name)}</span>
+              ${v.location ? `<br><span style="font-size: 0.75rem; color: #64748b;">📍 ${escapeHtml(v.location)}</span>` : ''}
+            </td>
+            <td>${sourceBadge}</td>
             <td>${statusBadge}</td>
-            <td><a href="${escapeHtml(v.source_url)}" target="_blank" style="color: var(--primary); font-size: 0.8rem;">${escapeHtml(v.source_url.substring(0, 30))}...</a></td>
-            <td>${(v.requirements || []).map(escapeHtml).join(", ") || "-"}</td>
+            <td><a href="${escapeHtml(v.source_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--primary); font-size: 0.8rem;">${escapeHtml(v.source_url.substring(0, 30))}... ↗</a></td>
+            <td style="max-width: 250px; font-size: 0.8rem;">${reqsText}</td>
             <td>
               <div style="display: flex; gap: 0.3rem;">
                 <button class="btn btn-outline btn-sm" onclick="evaluateAndPrepare('${v.id}')">⚡ Evaluar</button>
-                <button class="btn btn-outline btn-sm" onclick="reverifyVacancyStatus('${v.id}')" title="Re-verificar integridad y fraude">🔍</button>
+                <button class="btn btn-outline btn-sm" onclick="reverifyVacancyStatus('${v.id}')" title="Re-verificar integridad y disponibilidad">🔍</button>
               </div>
             </td>
           </tr>
         `;
       }).join("");
+    }
+
+    async function submitUniversalImport() {
+      const content = document.getElementById("txtUniversalContent").value.trim();
+      if (!content) {
+        showToast("Pega el texto del reporte o selecciona un archivo primero.", true);
+        return;
+      }
+      const provider = document.getElementById("selImportProvider").value;
+      try {
+        showToast("Procesando y normalizando vacantes...");
+        const res = await apiRequest("/api/v1/vacancies/import/universal", {
+          method: "POST",
+          body: JSON.stringify({ provider: provider, content: content })
+        });
+        if (res) {
+          showToast(`✓ Ingestión completada: ${res.vacancies_imported} nuevas importadas, ${res.vacancies_deduplicated} deduplicadas.`);
+          document.getElementById("txtUniversalContent").value = "";
+          document.getElementById("lblUploadedFileName").innerText = "";
+          await loadVacancies();
+          await loadImportBatches();
+        }
+      } catch (err) {
+        showToast("Error en ingestión: " + err.message, true);
+      }
+    }
+
+    function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      document.getElementById("lblUploadedFileName").innerText = file.name;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        document.getElementById("txtUniversalContent").value = e.target.result;
+        showToast(`Archivo ${file.name} cargado en el área de texto.`);
+      };
+      reader.readAsText(file);
+    }
+
+    async function loadImportBatches() {
+      if (!authToken) return;
+      try {
+        const batches = await apiRequest("/api/v1/vacancies/import-batches");
+        const tb = document.querySelector("#tblImportBatches tbody");
+        if (!tb) return;
+        if (!batches || batches.length === 0) {
+          tb.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Sin lotes registrados todavía.</td></tr>';
+          return;
+        }
+        tb.innerHTML = batches.map(b => {
+          let provBadge = b.provider;
+          if (b.provider === "chatgpt") provBadge = "🤖 ChatGPT";
+          else if (b.provider === "gemini") provBadge = "✨ Gemini";
+
+          return `
+            <tr>
+              <td style="font-size: 0.8rem; color: var(--text-muted);">${new Date(b.created_at).toLocaleString()}</td>
+              <td><strong>${escapeHtml(provBadge)}</strong></td>
+              <td><span class="hash-tag">${escapeHtml(b.import_type)}</span></td>
+              <td>${b.vacancies_found}</td>
+              <td><strong style="color: #10b981;">${b.vacancies_imported}</strong></td>
+              <td><strong style="color: #c084fc;">${b.vacancies_deduplicated}</strong></td>
+              <td><span class="badge ${b.status === 'completed' ? 'badge-confirmed' : 'badge-pending'}">${escapeHtml(b.status)}</span></td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {}
+    }
+
+    async function syncEmailPrompt() {
+      const confirmed = confirm("Sincronización por Correo:\n¿Deseas verificar y procesar nuevos correos entrantes de ChatGPT y Gemini?");
+      if (!confirmed) return;
+      try {
+        showToast("Buscando correos de ChatGPT y Gemini...");
+        const res = await apiRequest("/api/v1/vacancies/sync-email", { method: "POST" });
+        if (res) {
+          showToast(res.message || "Sincronización finalizada.");
+          await loadVacancies();
+          await loadImportBatches();
+        }
+      } catch (err) {
+        showToast(err.message || "Error al sincronizar correo.", true);
+      }
     }
 
     async function reverifyVacancyStatus(vacancyId) {
@@ -2398,36 +2645,266 @@
       await openEvaluateVacancyModal(vacancyId);
     }
 
-    async function inspectCandidacy(candidacyId) {
-      const data = await apiRequest(`/api/v1/candidacies/${candidacyId}`);
-      if (!data) return;
-      const c = data.candidacy;
+    let currentInboxStatusFilter = "pending_approval";
+
+    function filterInboxByStatus(status) {
+      currentInboxStatusFilter = status;
+      ["Pending", "Approved", "Postponed", "All"].forEach(s => {
+        const btn = document.getElementById("btnFilterInbox" + s);
+        if (btn) {
+          const match = (status === null && s === "All") ||
+                        (status === "pending_approval" && s === "Pending") ||
+                        (status === "approved" && s === "Approved") ||
+                        (status === "postponed" && s === "Postponed");
+          if (match) btn.classList.add("active");
+          else btn.classList.remove("active");
+        }
+      });
+      loadApprovalInbox();
+    }
+
+    async function runAutoPipelineFromUI() {
+      const thresholdVal = parseFloat(document.getElementById("selAutoPrepareThreshold").value || "0.65");
+      try {
+        showToast("⚡ Evaluando vacantes y preparando candidaturas...");
+        const res = await apiRequest("/api/v1/candidacies/pipeline/auto-prepare", {
+          method: "POST",
+          body: JSON.stringify({ min_score_threshold: thresholdVal })
+        });
+        if (res) {
+          showToast(`✓ Pipeline completado: ${res.candidacies_prepared} candidaturas preparadas para aprobación nocturna.`);
+          await loadApprovalInbox();
+        }
+      } catch (err) {
+        showToast("Error en pipeline: " + err.message, true);
+      }
+    }
+
+    async function loadApprovalInbox() {
+      if (!authToken) return;
       const cont = document.getElementById("candidacyReviewContainer");
-      cont.innerHTML = `
-        <div style="background: #131c2e; border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 1.5rem;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-            <h3>Candidatura #${c.id.substring(0, 8)} - Estado: <span class="badge badge-pending">${c.status}</span></h3>
-            <div>Hash Inmutable: <span class="hash-tag" id="lblContentHash">${c.content_hash.substring(0, 16)}...</span></div>
-          </div>
-          <div class="grid" style="margin-bottom: 1.5rem;">
-            <div>
-              <label>Carta de Presentación / Mensaje</label>
-              <textarea id="txtCoverLetter" style="height: 140px;">${c.cover_letter || ""}</textarea>
-              <button class="btn btn-outline btn-sm" style="margin-top: 0.5rem;" onclick="modifyCoverLetter('${c.id}')">Actualizar Contenido (Invalida aprobación)</button>
+      if (!cont) return;
+      cont.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">Cargando bandeja de aprobación...</div>';
+
+      try {
+        let url = "/api/v1/candidacies/inbox";
+        if (currentInboxStatusFilter) {
+          url += `?status_filter=${encodeURIComponent(currentInboxStatusFilter)}`;
+        }
+        const cards = await apiRequest(url);
+        if (!cards || cards.length === 0) {
+          cont.innerHTML = `
+            <div style="text-align: center; padding: 3rem 1.5rem; background: #131c2e; border: 1px dashed var(--card-border); border-radius: 0.5rem;">
+              <div style="font-size: 2rem; margin-bottom: 0.5rem;">📭</div>
+              <h3 style="margin-bottom: 0.5rem;">Bandeja vacía para este filtro</h3>
+              <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;">
+                No hay candidaturas ${currentInboxStatusFilter === 'pending_approval' ? 'pendientes de revisión' : 'en este estado'}. Importa vacantes de ChatGPT o Gemini y ejecuta el pipeline automático.
+              </p>
+              <button class="btn btn-primary" onclick="runAutoPipelineFromUI()">⚡ Preparar Candidaturas con Vacantes Disponibles</button>
             </div>
+          `;
+          return;
+        }
+
+        cont.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+            ${cards.map(c => renderApprovalCard(c)).join("")}
+          </div>
+        `;
+      } catch (err) {
+        cont.innerHTML = `<div style="color: #ef4444; padding: 1.5rem; text-align: center;">Error al cargar bandeja: ${err.message}</div>`;
+      }
+    }
+
+    function renderApprovalCard(c) {
+      const scorePct = Math.round((c.compatibility_score || 0) * 100);
+      let scoreColor = "#10b981";
+      if (scorePct < 65) scoreColor = "#f59e0b";
+      if (scorePct < 50) scoreColor = "#ef4444";
+
+      // Source badge
+      let srcBadge = `<span class="badge" style="background:#334155; color:#cbd5e1;">Manual</span>`;
+      if (c.source === "both") {
+        srcBadge = `<span class="badge" style="background: rgba(139, 92, 246, 0.25); color: #c084fc; border: 1px solid #a855f7;" title="Descubierta tanto por ChatGPT como por Gemini">⚡ Ambos (Deduplicado)</span>`;
+      } else if (c.source === "chatgpt") {
+        srcBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #34d399; border: 1px solid #10b981;">🤖 ChatGPT</span>`;
+      } else if (c.source === "gemini") {
+        srcBadge = `<span class="badge" style="background: rgba(59, 130, 246, 0.25); color: #60a5fa; border: 1px solid #3b82f6;">✨ Gemini</span>`;
+      }
+
+      // Status badge
+      let stBadge = `<span class="badge badge-pending">Borrador Preparado</span>`;
+      if (c.is_approved) {
+        stBadge = `<span class="badge badge-confirmed">✅ Aprobada (Programada)</span>`;
+      } else if (c.status === "postponed") {
+        stBadge = `<span class="badge" style="background: #854d0e; color: #fef08a;">⏸️ Pospuesta</span>`;
+      } else if (c.status === "rejected_by_user") {
+        stBadge = `<span class="badge badge-danger">❌ Rechazada</span>`;
+      } else if (c.status === "simulated") {
+        stBadge = `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd;">🚀 Simulada</span>`;
+      }
+
+      const matchedHtml = (c.matched_skills && c.matched_skills.length > 0)
+        ? c.matched_skills.map(s => `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); margin: 0.15rem;">✓ ${escapeHtml(s)}</span>`).join("")
+        : '<span style="color: var(--text-muted); font-size: 0.8rem;">Sin coincidencias directas</span>';
+
+      const missingHtml = (c.missing_skills && c.missing_skills.length > 0)
+        ? c.missing_skills.map(s => `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fde047; border: 1px solid rgba(245, 158, 11, 0.3); margin: 0.15rem;">⚠️ ${escapeHtml(s)}</span>`).join("")
+        : '<span style="color: #10b981; font-size: 0.8rem;">Ninguno detectado</span>';
+
+      const risksHtml = (c.risks && c.risks.length > 0)
+        ? `<div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 0.375rem; padding: 0.5rem 0.75rem; margin-top: 0.5rem; font-size: 0.8rem; color: #fca5a5;">
+            <strong>⚠️ Alertas y Restricciones:</strong><br>
+            ${c.risks.map(r => `• ${escapeHtml(r)}`).join("<br>")}
+           </div>`
+        : "";
+
+      return `
+        <div class="card" id="card-cand-${c.id}" style="border: 1px solid ${c.is_approved ? '#10b981' : 'var(--card-border)'}; background: #131c2e; padding: 1.25rem;">
+          <!-- Encabezado de la tarjeta -->
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.5rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.75rem; margin-bottom: 0.75rem;">
             <div>
-              <label>Resumen de CV Adaptado</label>
-              <pre id="preCvSnapshot" style="background: #0f172a; padding: 1rem; border-radius: 0.375rem; border: 1px solid var(--card-border); font-size: 0.8rem; overflow: auto; height: 140px;">${JSON.stringify(c.adapted_cv_snapshot, null, 2)}</pre>
+              <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; flex-wrap: wrap;">
+                <h3 style="font-size: 1.1rem; margin: 0;">${escapeHtml(c.job_title)}</h3>
+                ${srcBadge}
+                ${stBadge}
+              </div>
+              <div style="font-size: 0.9rem; color: var(--text-muted);">
+                <strong style="color: var(--text);">${escapeHtml(c.company_name)}</strong> &nbsp;|&nbsp;
+                <a href="${escapeHtml(c.source_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--primary); text-decoration: none; font-size: 0.85rem;">🔗 Ver oferta original ↗</a>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: flex-end;">
+                <span style="font-size: 1.15rem; font-weight: 700; color: ${scoreColor};">${scorePct}%</span>
+                <span style="font-size: 0.8rem; color: var(--text-muted);">Compatibilidad</span>
+              </div>
+              <div style="width: 110px; height: 6px; background: #0f172a; border-radius: 999px; overflow: hidden; margin-top: 0.2rem;">
+                <div style="width: ${scorePct}%; height: 100%; background: ${scoreColor};"></div>
+              </div>
             </div>
           </div>
-          <div style="display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center; border-top: 1px solid var(--card-border); padding-top: 1rem; flex-wrap: wrap;">
-            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/candidacies/${c.id}/export/pdf', 'Candidatura_${c.id.substring(0,8)}_CV.pdf')">📄 Descargar CV (PDF)</button>
-            <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/candidacies/${c.id}/export/docx', 'Candidatura_${c.id.substring(0,8)}_CV.docx')">📝 Descargar CV (DOCX)</button>
-            <button id="btnRejectCandidacy" class="btn btn-danger btn-sm" onclick="rejectCandidacy('${c.id}')">Rechazar Definitivamente</button>
-            <button id="btnApproveCandidacy" class="btn btn-success" onclick="approveCandidacy('${c.id}')">Aprobar para Mañana 🚀</button>
+
+          <!-- Cuerpo: Grid de dos columnas -->
+          <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+            <!-- Columna Izquierda: Requisitos, CV Maestro, Documentos -->
+            <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+              <div>
+                <label style="font-size: 0.78rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Cumplimiento de Requisitos</label>
+                <div style="margin-top: 0.25rem;">${matchedHtml}</div>
+                <div style="margin-top: 0.25rem;">${missingHtml}</div>
+              </div>
+
+              <div style="background: #0f172a; border: 1px solid var(--card-border); border-radius: 0.375rem; padding: 0.65rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                  <span style="font-size: 0.8rem; color: var(--text-muted);">CV Maestro Seleccionado:</span>
+                  <span class="badge badge-confirmed" style="font-size: 0.7rem;">Adaptado</span>
+                </div>
+                <div style="font-weight: 600; font-size: 0.9rem; color: #93c5fd;">${escapeHtml(c.selected_cv.name || "CV Maestro")}</div>
+                ${c.selected_cv.specialization ? `<div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(c.selected_cv.specialization)}</div>` : ''}
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                  <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('${c.documents.pdf_url}', 'Candidatura_${c.id.substring(0,8)}_CV.pdf')">📄 Descargar PDF</button>
+                  <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('${c.documents.docx_url}', 'Candidatura_${c.id.substring(0,8)}_CV.docx')">📝 Descargar DOCX</button>
+                </div>
+              </div>
+
+              ${risksHtml}
+            </div>
+
+            <!-- Columna Derecha: Vista previa del mensaje / carta de presentación -->
+            <div style="display: flex; flex-direction: column;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                <label style="margin: 0; font-size: 0.78rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Mensaje Personalizado (Carta de Presentación)</label>
+                <span style="font-size: 0.75rem; color: #f59e0b;">⚠️ Editar invalida aprobación</span>
+              </div>
+              <textarea id="txtLetter-${c.id}" style="flex: 1; min-height: 140px; font-size: 0.85rem; line-height: 1.45; background: #0f172a;">${escapeHtml(c.cover_letter || "")}</textarea>
+              <div style="display: flex; justify-content: flex-end; margin-top: 0.4rem;">
+                <button class="btn btn-outline btn-sm" onclick="saveCandidacyMessage('${c.id}')">💾 Guardar Cambios de Mensaje</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pie de tarjeta: Huella, programación y acciones -->
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; border-top: 1px solid var(--card-border); padding-top: 0.75rem;">
+            <div style="font-size: 0.8rem; color: var(--text-muted);">
+              ${c.approval_hash ? `Huella Aprobada: <span class="hash-tag">${c.approval_hash.substring(0, 16)}...</span>` : 'Sin huella de aprobación activa'}
+              ${c.scheduled_task ? ` &nbsp;|&nbsp; 📅 Ejecución programada: <strong style="color: #60a5fa;">${new Date(c.scheduled_task.scheduled_date).toLocaleString()}</strong>` : ''}
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              ${!c.is_approved ? `
+                <button class="btn btn-danger btn-sm" onclick="rejectCandidacyCard('${c.id}')">❌ Rechazar</button>
+                <button class="btn btn-outline btn-sm" onclick="postponeCandidacyCard('${c.id}')">⏸️ Posponer</button>
+                <button class="btn btn-success" onclick="approveCandidacyCard('${c.id}')">✅ Aprobar para Mañana 🚀</button>
+              ` : `
+                <span style="font-size: 0.85rem; color: #10b981; font-weight: 600;">✓ Programada para despacho matutino</span>
+                <button class="btn btn-outline btn-sm" onclick="postponeCandidacyCard('${c.id}')">Pausar / Posponer</button>
+              `}
+            </div>
           </div>
         </div>
       `;
+    }
+
+    async function approveCandidacyCard(id) {
+      try {
+        const res = await apiRequest(`/api/v1/candidacies/${id}/approve`, {
+          method: "POST",
+          body: JSON.stringify({ user_timezone: "America/El_Salvador", notes: "Aprobado desde bandeja nocturna" })
+        });
+        showToast("¡Candidatura aprobada! Tarea programada para mañana a las 09:00 (America/El_Salvador).");
+        await loadApprovalInbox();
+        if (typeof loadCRM === "function") loadCRM();
+      } catch (e) {
+        showToast("Error al aprobar: " + e.message, true);
+      }
+    }
+
+    async function postponeCandidacyCard(id) {
+      try {
+        await apiRequest(`/api/v1/candidacies/${id}/postpone`, {
+          method: "POST",
+          body: JSON.stringify({ reason: "Pospuesto para posterior revisión por el usuario" })
+        });
+        showToast("Candidatura pospuesta. Se mantiene en la bandeja para posterior revisión.");
+        await loadApprovalInbox();
+      } catch (e) {
+        showToast("Error al posponer: " + e.message, true);
+      }
+    }
+
+    async function rejectCandidacyCard(id) {
+      if (!confirm("¿Deseas rechazar definitivamente esta candidatura?")) return;
+      try {
+        await apiRequest(`/api/v1/candidacies/${id}/reject`, {
+          method: "POST",
+          body: JSON.stringify({ reason: "Rechazado manualmente en revisión nocturna" })
+        });
+        showToast("Candidatura rechazada definitivamente.");
+        await loadApprovalInbox();
+        if (typeof loadCRM === "function") loadCRM();
+      } catch (e) {
+        showToast("Error al rechazar: " + e.message, true);
+      }
+    }
+
+    async function saveCandidacyMessage(id) {
+      const textarea = document.getElementById("txtLetter-" + id);
+      if (!textarea) return;
+      const newLetter = textarea.value;
+      try {
+        await apiRequest(`/api/v1/candidacies/${id}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ new_cover_letter: newLetter })
+        });
+        showToast("Mensaje actualizado. Si la candidatura estaba aprobada, su aprobación fue invalidada por seguridad.");
+        await loadApprovalInbox();
+      } catch (e) {
+        showToast("Error al modificar mensaje: " + e.message, true);
+      }
+    }
+
+    async function inspectCandidacy(candidacyId) {
+      await loadApprovalInbox();
     }
 
     async function downloadCVDocument(endpoint, fallbackFilename) {
@@ -2470,41 +2947,6 @@
       } catch (err) {
         showToast("Error de conexión al descargar documento.", "error");
       }
-    }
-
-    async function approveCandidacy(id) {
-      try {
-        const res = await apiRequest(`/api/v1/candidacies/${id}/approve`, {
-          method: "POST",
-          body: JSON.stringify({ user_timezone: "America/Mexico_City", notes: "Aprobado desde interfaz mínima local" })
-        });
-        showToast("¡Candidatura aprobada! Programada para mañana a las 09:00.");
-        inspectCandidacy(id);
-      } catch (e) {}
-    }
-
-    async function rejectCandidacy(id) {
-      if (!confirm("¿Deseas rechazar definitivamente esta candidatura?")) return;
-      try {
-        await apiRequest(`/api/v1/candidacies/${id}/reject`, {
-          method: "POST",
-          body: JSON.stringify({ reason: "Rechazado manualmente por el usuario" })
-        });
-        showToast("Candidatura rechazada.");
-        inspectCandidacy(id);
-      } catch (e) {}
-    }
-
-    async function modifyCoverLetter(id) {
-      const newLetter = document.getElementById("txtCoverLetter").value;
-      try {
-        await apiRequest(`/api/v1/candidacies/${id}/modify`, {
-          method: "POST",
-          body: JSON.stringify({ new_cover_letter: newLetter })
-        });
-        showToast("Contenido modificado. Aprobación previa invalidada.");
-        inspectCandidacy(id);
-      } catch (e) {}
     }
 
     async function loadCRM() {

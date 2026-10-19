@@ -501,6 +501,55 @@ class ApprovalService:
         return approval
 
     @classmethod
+    async def postpone_candidacy(
+        cls,
+        session: AsyncSession,
+        tenant_id: str,
+        candidacy_id: str,
+        notes: Optional[str] = None,
+        clock: Optional[Clock] = None,
+    ) -> Candidacy:
+        """Pospone una candidatura para revisión posterior sin programar envío."""
+        c = clock or get_clock()
+        stmt = select(Candidacy).where(Candidacy.id == candidacy_id, Candidacy.tenant_id == tenant_id)
+        res = await session.execute(stmt)
+        candidacy = res.scalar_one_or_none()
+        if not candidacy:
+            raise ValueError(f"Candidatura no encontrada: {candidacy_id}")
+
+        candidacy.status = "postponed"
+
+        tasks_res = await session.execute(
+            select(ScheduledTask).where(
+                ScheduledTask.candidacy_id == candidacy.id,
+                ScheduledTask.tenant_id == tenant_id,
+                ScheduledTask.status == "pending",
+            )
+        )
+        for t in tasks_res.scalars():
+            t.status = "cancelled"
+
+        crm_res = await session.execute(
+            select(CRMEntry).where(CRMEntry.candidacy_id == candidacy.id, CRMEntry.tenant_id == tenant_id)
+        )
+        crm = crm_res.scalar_one_or_none()
+        if crm:
+            old_st = crm.current_status
+            crm.current_status = "postponed"
+            crm.notes = f"Pospuesta: {notes or 'Revisión nocturna posterior'}"
+            session.add(CRMEvent(
+                tenant_id=tenant_id,
+                crm_entry_id=crm.id,
+                event_type="postponed",
+                old_status=old_st,
+                new_status="postponed",
+                details={"notes": notes},
+            ))
+
+        await session.flush()
+        return candidacy
+
+    @classmethod
     async def modify_candidacy(
         cls,
         session: AsyncSession,

@@ -72,16 +72,17 @@ def verify_secret_file_security(path: Path) -> None:
         )
 
     # 4. Permisos estrictos en POSIX (solo propietario, nada para grupo ni otros)
-    mode = stat.S_IMODE(st.st_mode)
-    if (mode & 0o077) != 0:
-        raise InsecureConfigurationError(
-            f"Configuración insegura detectada: permisos inseguros {oct(mode)} en '{path}'. "
-            f"Debe tener permisos restrictivos 0600 (solo lectura/escritura para el propietario)."
-        )
-    if (mode & 0o400) == 0:
-        raise InsecureConfigurationError(
-            f"Configuración insegura detectada: el archivo '{path}' no tiene permisos de lectura para el propietario ({oct(mode)})."
-        )
+    if os.name == "posix":
+        mode = stat.S_IMODE(st.st_mode)
+        if (mode & 0o077) != 0:
+            raise InsecureConfigurationError(
+                f"Configuración insegura detectada: permisos inseguros {oct(mode)} en '{path}'. "
+                f"Debe tener permisos restrictivos 0600 (solo lectura/escritura para el propietario)."
+            )
+        if (mode & 0o400) == 0:
+            raise InsecureConfigurationError(
+                f"Configuración insegura detectada: el archivo '{path}' no tiene permisos de lectura para el propietario ({oct(mode)})."
+            )
 
 
 def _read_secret_file_locked(path: Path, max_retries: int = 50, retry_delay: float = 0.05) -> str:
@@ -210,7 +211,7 @@ class Settings(BaseSettings):
     app_secret_key: Optional[str] = Field(default=None)
     app_host: str = Field(default="127.0.0.1")
     app_port: int = Field(default=8000, ge=1024, le=65535)
-    app_timezone: str = Field(default="America/Mexico_City")
+    app_timezone: str = Field(default="America/El_Salvador")
 
     # === Database ===
     database_url: str = Field(default="sqlite+aiosqlite:///./data/maquinachamba.db")
@@ -236,7 +237,7 @@ class Settings(BaseSettings):
     # === Execution Schedule ===
     execution_window_start: str = Field(default="09:00")
     execution_window_end: str = Field(default="18:00")
-    execution_timezone: str = Field(default="America/Mexico_City")
+    execution_timezone: str = Field(default="America/El_Salvador")
 
     # === Security ===
     simulation_mode: bool = Field(default=True)

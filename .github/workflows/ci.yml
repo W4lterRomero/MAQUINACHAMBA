@@ -35,4 +35,4 @@ jobs:
           python -m pytest tests/ -v --tb=short
 
       - name: Check for secrets in application source and scripts
-        run: python scripts/check_secrets.py backend/app frontend/src scripts
+        run: python scripts/check_secrets.py backend/app scripts

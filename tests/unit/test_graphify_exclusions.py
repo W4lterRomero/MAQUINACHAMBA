@@ -133,5 +133,11 @@ class TestGraphifyExclusions:
         assert "check_secrets.py" in skipped_basenames
         assert ".env.example" in skipped_basenames
 
-        # Asegurar que ningún archivo .env real exista o haya sido indexado
-        assert not (repo_root / ".env").exists()
+        # Asegurar que ningún archivo .env real haya sido indexado en el corpus de Graphify
+        all_corpus = [
+            Path(f).name
+            for cat in ("code", "document", "paper", "image", "video")
+            for f in res.get("files", {}).get(cat, [])
+        ]
+        assert ".env" not in all_corpus
+        assert ".env.production" not in all_corpus

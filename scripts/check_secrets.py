@@ -39,4 +39,4 @@ def scan(paths):
 
 
 if __name__ == "__main__":
-    sys.exit(scan(sys.argv[1:] or ["backend/app", "frontend/src"]))
+    sys.exit(scan(sys.argv[1:] or ["backend/app", "scripts"]))

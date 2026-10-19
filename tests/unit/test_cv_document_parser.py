@@ -400,6 +400,13 @@ def test_document_parser_process_memory_budget_exceeded(monkeypatch):
     Verifica que si la extracción en proceso hijo supera el presupuesto estricto de memoria,
     el proceso falla de forma segura fail-closed lanzando InvalidDocumentError.
     """
+    try:
+        import resource
+    except ImportError:
+        resource = None
+    if resource is None or not hasattr(resource, "setrlimit"):
+        pytest.skip("RLIMIT_AS memory limits require POSIX resource module")
+
     def memory_hog_parse_internal(cls, file_bytes, filename):
         # Asigna un bloque de memoria que excede el límite fijado
         _ = bytearray(60 * 1024 * 1024)

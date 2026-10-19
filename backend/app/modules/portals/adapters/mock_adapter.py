@@ -7,7 +7,11 @@ sin realizar peticiones externas reales.
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import fcntl
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 import hashlib
 import json
 import os
@@ -81,13 +85,15 @@ class MockPortalAdapter:
             "event": event,
         }
         with open(log_path, "a", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            if HAS_FCNTL:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
                 f.write(json.dumps(record) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                if HAS_FCNTL:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     @classmethod
     def get_recorded_calls(cls, log_path: Path) -> List[Dict[str, Any]]:
@@ -99,7 +105,8 @@ class MockPortalAdapter:
             return []
         calls = []
         with open(log_path, "r", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            if HAS_FCNTL:
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
             try:
                 for line_num, line in enumerate(f, start=1):
                     line = line.strip()
@@ -113,7 +120,8 @@ class MockPortalAdapter:
                             f"Línea corrupta en log de portal {log_path}:{line_num}: '{line}'. Error: {err}"
                         ) from err
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                if HAS_FCNTL:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         return calls
 
     @classmethod

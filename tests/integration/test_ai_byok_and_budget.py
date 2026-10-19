@@ -45,11 +45,12 @@ async def test_secrets_vault_encryption_permissions_and_deletion(tmp_path):
     # 2. Verificar permisos POSIX del archivo (0600) y directorio (0700)
     vault_file = tmp_path / tenant_1 / f"{provider}.vault"
     assert vault_file.exists()
-    file_mode = stat.S_IMODE(vault_file.stat().st_mode)
-    assert file_mode == 0o600
+    if os.name == "posix":
+        file_mode = stat.S_IMODE(vault_file.stat().st_mode)
+        assert file_mode == 0o600
 
-    dir_mode = stat.S_IMODE((tmp_path / tenant_1).stat().st_mode)
-    assert dir_mode == 0o700
+        dir_mode = stat.S_IMODE((tmp_path / tenant_1).stat().st_mode)
+        assert dir_mode == 0o700
 
     # 3. El contenido en disco NO es texto plano
     raw_disk_bytes = vault_file.read_bytes()
