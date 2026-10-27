@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Máquina de Chamba 🔧 — Panel de Control Local</title>
+  <title>Máquina de Chamba — Panel de Control Local</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -151,7 +151,7 @@
     /* Refined workspace UI */
     :root {
       color-scheme: light;
-      --bg: #f3f6f8;
+      --bg: #f4f7f8;
       --card-bg: #ffffff;
       --card-border: #e2e8ed;
       --text: #172b3a;
@@ -164,8 +164,8 @@
       --danger: #b74646;
       --danger-hover: #963838;
       --tag-bg: #edf4f4;
-      --navy: #112b3b;
-      --soft-teal: #e8f5f2;
+      --navy: #102d3c;
+      --soft-teal: #e7f4f2;
     }
 
     * { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -205,12 +205,30 @@
       flex-direction: column;
       align-items: stretch;
       gap: .25rem;
-      padding: 1.25rem .9rem;
-      background: #f9fbfc;
-      border-right: 1px solid var(--card-border);
+      padding: 1.3rem .85rem 1rem;
+      background: linear-gradient(180deg, #15384a 0%, #102d3c 100%);
+      border-right: 1px solid #143243;
       border-bottom: 0;
       overflow-x: hidden;
       overflow-y: auto;
+    }
+    nav::before {
+      content: "ESPACIO DE TRABAJO";
+      padding: .25rem .8rem .75rem;
+      color: #85a0ae;
+      font-size: .62rem;
+      font-weight: 750;
+      letter-spacing: .13em;
+    }
+    nav::after {
+      content: "LOCAL · PRIVADO · BAJO TU CONTROL";
+      margin-top: auto;
+      padding: 1.1rem .8rem .2rem;
+      color: #7d9aa8;
+      font-size: .58rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      line-height: 1.6;
     }
     nav button {
       width: 100%;
@@ -219,23 +237,74 @@
       border: 0;
       border-radius: 9px;
       border-bottom: 0;
-      color: #5d7180;
+      color: #b1c2ca;
       text-align: left;
       font-size: .83rem;
       font-weight: 550;
+      display: flex;
+      align-items: center;
+      gap: .72rem;
       transition: background .18s ease, color .18s ease, transform .18s ease;
     }
-    nav button:hover { color: var(--navy); background: #edf3f5; }
-    nav button.active { color: #076d68; background: var(--soft-teal); font-weight: 700; }
+    nav button::before {
+      width: 1.35rem;
+      height: 1.35rem;
+      display: inline-grid;
+      flex: 0 0 1.35rem;
+      place-items: center;
+      border-radius: 6px;
+      background: rgba(255,255,255,.075);
+      color: #c4d5dc;
+      font-size: .9rem;
+      font-weight: 700;
+    }
+    #nav-tab-dashboard::before { content: "▦"; }
+    #nav-tab-profile::before { content: "◉"; }
+    #nav-tab-cv-import::before { content: "↑"; }
+    #nav-tab-master-cvs::before { content: "▤"; }
+    #nav-tab-communication::before { content: "✦"; }
+    #nav-tab-vacancies::before { content: "⌕"; }
+    #nav-tab-approvals::before { content: "✓"; }
+    #nav-tab-crm::before { content: "↗"; }
+    #nav-tab-execution::before { content: "◷"; }
+    #nav-tab-ai-config::before { content: "◎"; }
+    #nav-tab-backups::before { content: "▣"; }
+    nav button:hover { color: #fff; background: rgba(255,255,255,.085); }
+    nav button.active {
+      color: #f7ffff;
+      background: rgba(80, 177, 165, .2);
+      box-shadow: inset 3px 0 #70d0bf;
+      font-weight: 700;
+    }
+    nav button.active::before { background: #70d0bf; color: #123746; }
     main {
       grid-area: main;
       width: 100%;
       max-width: 1500px;
       min-width: 0;
       margin: 0 auto;
-      padding: 2rem clamp(1.25rem, 3vw, 3rem) 3rem;
+      padding: 2.2rem clamp(1.25rem, 3.4vw, 3.5rem) 3.5rem;
       overflow-x: hidden;
+      background: radial-gradient(ellipse at 88% 0%, rgba(216, 237, 233, .42), transparent 36%), var(--bg);
     }
+    .page-intro { margin: 0 0 1.65rem; max-width: 820px; }
+    .page-intro-kicker {
+      margin: 0 0 .42rem;
+      color: #087e78;
+      font-size: .66rem;
+      font-weight: 800;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .page-intro h1 {
+      margin: 0;
+      color: #183748;
+      font-size: clamp(1.6rem, 2.25vw, 2.05rem);
+      font-weight: 760;
+      letter-spacing: -.045em;
+      line-height: 1.12;
+    }
+    .page-intro p:last-child { margin: .55rem 0 0; max-width: 660px; color: #71838d; font-size: .91rem; line-height: 1.6; }
     .grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1.15rem; align-items: start; }
     .card {
       min-width: 0;
@@ -290,6 +359,20 @@
     .upload-zone:hover, .upload-zone.dragover { background: #f0f8f7; border-color: #51a29c; }
     .quote-box { background: #f2f8f8; color: #256b68; }
     .master-cv-card.active-cv { border-color: #d3a64d; box-shadow: 0 0 0 1px #d3a64d; }
+    .brand::before {
+      content: "M";
+      width: 34px;
+      height: 34px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 10px;
+      background: linear-gradient(145deg, #0b8a80, #176176);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: -.04em;
+      box-shadow: 0 3px 8px rgba(7, 102, 101, .2);
+    }
     .toast { background: #173646; border-color: #6db5ae; border-radius: 10px; }
     .modal { background: #fff; border-color: #dfe7eb; border-radius: 16px; box-shadow: 0 24px 70px rgba(10, 28, 41, .22); }
     :focus-visible { outline: 3px solid rgba(8, 126, 120, .35); outline-offset: 2px; }
@@ -302,6 +385,7 @@
       }
       header { min-height: 72px; padding: .8rem 1rem; flex-wrap: wrap; gap: .65rem; }
       .brand { min-width: 0; font-size: .95rem; gap: .55rem; }
+      .brand::before { width: 30px; height: 30px; border-radius: 8px; }
       .sim-badge { font-size: .58rem; padding: .28rem .48rem; }
       .user-info { width: 100%; justify-content: space-between; gap: .5rem; font-size: .68rem; }
       .user-info > span { min-width: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -316,10 +400,18 @@
         overflow-x: auto;
         overflow-y: hidden;
         scrollbar-width: none;
+        background: #15384a;
       }
+      nav::before, nav::after { display: none; }
       nav::-webkit-scrollbar { display: none; }
-      nav button { width: auto; min-height: 38px; padding: .55rem .75rem; font-size: .76rem; }
+      nav button { width: auto; min-height: 38px; padding: .48rem .72rem; font-size: .76rem; color: #c1d0d7; }
+      nav button::before { width: 1.15rem; height: 1.15rem; flex-basis: 1.15rem; font-size: .78rem; }
+      nav button.active { box-shadow: inset 0 -2px #70d0bf; }
+      nav button.active::before { background: #70d0bf; color: #123746; }
       main { padding: 1rem .85rem 2rem; }
+      .page-intro { margin-bottom: 1rem; }
+      .page-intro h1 { font-size: 1.55rem; }
+      .page-intro p:last-child { font-size: .84rem; }
       .grid { grid-template-columns: minmax(0, 1fr); gap: .85rem; }
       .card { padding: 1.1rem; border-radius: 12px; }
       .kanban-board { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
@@ -337,7 +429,7 @@
 
   <header>
     <div class="brand">
-      <span>Máquina de Chamba 🔧</span>
+      <span>Máquina de Chamba</span>
       <span class="sim-badge" id="simBadge">Modo Simulación Activo</span>
     </div>
     <div class="user-info">
@@ -348,7 +440,7 @@
   </header>
 
   <nav>
-    <button data-tab="tab-dashboard" id="nav-tab-dashboard" onclick="switchTab('tab-dashboard')">📊 Dashboard</button>
+    <button data-tab="tab-dashboard" id="nav-tab-dashboard" onclick="switchTab('tab-dashboard')">Dashboard</button>
     <button data-tab="tab-profile" id="nav-tab-profile" class="active" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
     <button data-tab="tab-cv-import" id="nav-tab-cv-import" onclick="switchTab('tab-cv-import')">Importar y Revisar CV</button>
     <button data-tab="tab-master-cvs" id="nav-tab-master-cvs" onclick="switchTab('tab-master-cvs')">CVs Maestros</button>
@@ -358,7 +450,7 @@
     <button data-tab="tab-crm" id="nav-tab-crm" onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
     <button data-tab="tab-execution" id="nav-tab-execution" onclick="switchTab('tab-execution')">Cola de Ejecución</button>
     <button data-tab="tab-ai-config" id="nav-tab-ai-config" onclick="switchTab('tab-ai-config')">Configuración IA (BYOK)</button>
-    <button data-tab="tab-backups" id="nav-tab-backups" onclick="switchTab('tab-backups')">💾 Respaldos y Backups</button>
+    <button data-tab="tab-backups" id="nav-tab-backups" onclick="switchTab('tab-backups')">Respaldos y Backups</button>
   </nav>
 
   <main>
@@ -1871,6 +1963,9 @@ Ejemplo:
       const targetNavBtn = document.querySelector(`nav button[data-tab="${tabId}"]`) || document.getElementById(`nav-${tabId}`);
       if (targetNavBtn) {
         targetNavBtn.classList.add("active");
+        if (window.matchMedia("(max-width: 760px)").matches) {
+          targetNavBtn.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+        }
       }
 
       const targetTab = document.getElementById(tabId);
@@ -4621,6 +4716,37 @@ Ejemplo:
       return;
     }
 
+    function mountPageIntros() {
+      const pageCopy = {
+        "tab-profile": ["TU PERFIL", "Perfil profesional", "Mantén tu experiencia, habilidades y datos profesionales verificados en un solo lugar."],
+        "tab-cv-import": ["DOCUMENTOS", "Importa tu currículum", "Extrae la información de tu CV y revisa cada dato antes de añadirlo a tu perfil."],
+        "tab-master-cvs": ["CURRÍCULUMS", "Tus CVs por especialidad", "Prepara versiones enfocadas para cada tipo de puesto y elige cuál usar al evaluar oportunidades."],
+        "tab-communication": ["TU VOZ", "Estilo y comunicación", "Define un tono profesional coherente para tus mensajes y candidaturas."],
+        "tab-vacancies": ["OPORTUNIDADES", "Vacantes de interés", "Importa oportunidades, compara requisitos y organiza las que quieras explorar."],
+        "tab-approvals": ["CONTROL HUMANO", "Revisa antes de avanzar", "Cada candidatura espera tu aprobación antes de programarse o enviarse."],
+        "tab-crm": ["SEGUIMIENTO", "Tu búsqueda, en orden", "Consulta el avance de cada candidatura y ten a mano sus próximos pasos."],
+        "tab-execution": ["AGENDA", "Ejecuciones programadas", "Consulta las acciones aprobadas y el estado de la cola de trabajo."],
+        "tab-ai-config": ["PREFERENCIAS", "Configuración de IA", "Conecta tu proveedor y define el uso de IA bajo tus propias claves y límites."],
+        "tab-backups": ["DATOS Y SEGURIDAD", "Respaldos de tu espacio", "Protege tus datos locales y verifica la integridad de tus respaldos."]
+      };
+
+      Object.entries(pageCopy).forEach(([tabId, [kicker, title, description]]) => {
+        const section = document.getElementById(tabId);
+        if (!section || section.querySelector(":scope > .page-intro")) return;
+        const intro = document.createElement("div");
+        intro.className = "page-intro";
+        const eyebrow = document.createElement("p");
+        eyebrow.className = "page-intro-kicker";
+        eyebrow.textContent = kicker;
+        const heading = document.createElement("h1");
+        heading.textContent = title;
+        const summary = document.createElement("p");
+        summary.textContent = description;
+        intro.append(eyebrow, heading, summary);
+        section.prepend(intro);
+      });
+    }
+
     async function loadInitialData() {
       await loadDashboardMetrics();
       await loadProfileData();
@@ -4635,6 +4761,7 @@ Ejemplo:
     }
 
     window.addEventListener("DOMContentLoaded", async () => {
+      mountPageIntros();
       await checkAuthStatus();
       if (authToken) {
         await loadInitialData();
