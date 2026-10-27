@@ -18,6 +18,8 @@ from backend.app.core.config import get_settings
 from backend.app.core.database import async_session_factory, init_db, close_db
 from backend.app.modules.approvals.models import ScheduledTask
 from backend.app.modules.execution.worker import DurableExecutionWorker
+from backend.app.modules.vacancies.models import JobSearchPreferences
+from backend.app.modules.vacancies.search_service import JobSearchService
 
 logger = logging.getLogger("maquinachamba.daemon")
 
@@ -139,10 +141,51 @@ class DurableExecutionDaemon:
                         "message": f"Error: {exc}",
                     })
 
+            # 3. Búsqueda periódica autónoma de vacantes para tenants con periodicidad activa (REQ-007, REQ-031)
+            search_processed = []
+            try:
+                search_prefs_stmt = (
+                    select(JobSearchPreferences)
+                    .where(
+                        JobSearchPreferences.is_periodic_enabled.is_(True),
+                        JobSearchPreferences.source_access_authorized.is_(True),
+                        JobSearchPreferences.next_run_at.is_not(None),
+                        JobSearchPreferences.next_run_at <= now,
+                    )
+                )
+                search_prefs_res = await session.execute(search_prefs_stmt)
+                due_searches = search_prefs_res.scalars().all()
+
+                for sp in due_searches:
+                    s_tenant_id = sp.tenant_id
+                    try:
+                        logger.info(f"[{self.worker_id}] Ejecutando búsqueda periódica autónoma para tenant '{s_tenant_id}'...")
+                        res_search = await JobSearchService.execute_job_search(
+                            session=session,
+                            tenant_id=s_tenant_id,
+                            force_dry_run=False,
+                        )
+                        search_processed.append({
+                            "tenant_id": s_tenant_id,
+                            "success": True,
+                            "jobs_found": res_search.get("jobs_found", 0),
+                            "jobs_new": res_search.get("jobs_new", 0),
+                        })
+                    except Exception as s_exc:
+                        logger.error(f"[{self.worker_id}] Error en búsqueda periódica de tenant '{s_tenant_id}': {s_exc}")
+                        search_processed.append({
+                            "tenant_id": s_tenant_id,
+                            "success": False,
+                            "error": str(s_exc),
+                        })
+            except Exception as outer_s_exc:
+                logger.error(f"[{self.worker_id}] Error al consultar búsquedas periódicas: {outer_s_exc}")
+
             return {
                 "recovered_count": recovered_count,
                 "processed_count": len(processed),
                 "tasks": processed,
+                "periodic_searches": search_processed,
             }
 
     async def run_forever(self, max_iterations: Optional[int] = None):

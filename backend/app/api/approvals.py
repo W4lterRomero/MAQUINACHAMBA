@@ -398,3 +398,61 @@ async def export_candidacy_cv(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class LinkedInConfirmRequest(BaseModel):
+    confirmation_note: Optional[str] = None
+    external_reference: Optional[str] = None
+
+
+@router.get("/{candidacy_id}/linkedin-assisted", status_code=status.HTTP_200_OK)
+async def get_linkedin_assisted_package(
+    candidacy_id: str,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    REQ-024: Obtiene el paquete de postulación guiada y checklist para LinkedIn en Modo Asistido.
+    """
+    from backend.app.modules.portals.linkedin_service import (
+        LinkedInAssistedService,
+        LinkedInAssistedError,
+    )
+    try:
+        return await LinkedInAssistedService.get_assisted_package(
+            session=session,
+            tenant_id=tenant_id,
+            candidacy_id=candidacy_id,
+        )
+    except LinkedInAssistedError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{candidacy_id}/linkedin-confirm", status_code=status.HTTP_200_OK)
+async def confirm_linkedin_submission(
+    candidacy_id: str,
+    payload: Optional[LinkedInConfirmRequest] = None,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    REQ-024: Registra la confirmación manual de postulación enviada por el usuario en LinkedIn.
+    Transiciona el estado en CRM a 'sent_confirmed' y actualiza la tarea durable.
+    """
+    from backend.app.modules.portals.linkedin_service import (
+        LinkedInAssistedService,
+        LinkedInAssistedError,
+    )
+    note = payload.confirmation_note if payload else None
+    ref = payload.external_reference if payload else None
+    try:
+        return await LinkedInAssistedService.confirm_submission(
+            session=session,
+            tenant_id=tenant_id,
+            candidacy_id=candidacy_id,
+            confirmation_note=note,
+            external_reference=ref,
+        )
+    except LinkedInAssistedError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+

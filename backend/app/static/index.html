@@ -174,6 +174,7 @@
     <button data-tab="tab-crm" id="nav-tab-crm" onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
     <button data-tab="tab-execution" id="nav-tab-execution" onclick="switchTab('tab-execution')">Cola de Ejecución</button>
     <button data-tab="tab-ai-config" id="nav-tab-ai-config" onclick="switchTab('tab-ai-config')">Configuración IA (BYOK)</button>
+    <button data-tab="tab-backups" id="nav-tab-backups" onclick="switchTab('tab-backups')">💾 Respaldos y Backups</button>
   </nav>
 
   <main>
@@ -583,56 +584,207 @@
       </div>
     </section>
 
-    <!-- TAB 2: VACANTES -->
+    <!-- TAB 2: VACANTES (BÚSQUEDA REAL, REQ-007, REQ-008, REQ-009, REQ-030) -->
     <section id="tab-vacancies" class="tab-content">
-      <div class="grid">
-        <div class="card" style="max-width: 450px;">
-          <h2>Importar Vacante de Empleo</h2>
-          <form id="frmVacancy" onsubmit="importVacancy(event)">
-            <div class="form-group">
-              <label>Empresa</label>
-              <input type="text" id="vacCompany" required placeholder="Tech Corp">
+      <!-- PANEL SUPERIOR: FUENTE EXTERNA, AUTORIZACIÓN Y ESTADO DE EJECUCIÓN -->
+      <div class="card" style="margin-bottom: 1.5rem; border: 1px solid var(--primary);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 1rem; margin-bottom: 1rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
+              <h2 style="margin: 0; font-size: 1.25rem;">🔍 Búsqueda de Vacantes Reales (Remotive API)</h2>
+              <span id="badgeSourceAuth" class="badge badge-pending">Modo Local Seguro (Sin Red)</span>
+              <span id="badgePeriodicStatus" class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8;">Periódica: Inactiva</span>
             </div>
-            <div class="form-group">
-              <label>Título del Puesto</label>
-              <input type="text" id="vacTitle" required placeholder="Senior Backend Engineer">
-            </div>
-            <div class="form-group">
-              <label>URL Original (Protegida anti-SSRF)</label>
-              <input type="url" id="vacUrl" required placeholder="https://careers.techcorp.com/job/42">
-            </div>
-            <div class="form-group">
-              <label>Requisitos (separados por coma)</label>
-              <input type="text" id="vacReqs" placeholder="Python, FastAPI, SQL, Docker">
-            </div>
-            <div class="form-group">
-              <label>Descripción</label>
-              <textarea id="vacDesc" placeholder="Detalles de la posición..."></textarea>
-            </div>
-            <div class="form-group">
-              <label>Fecha de Cierre (Opcional)</label>
-              <input type="date" id="vacClosingDate">
-            </div>
-            <button type="submit" class="btn btn-primary">Registrar Vacante</button>
-          </form>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0; max-width: 750px;">
+              Conector público sin requerir credenciales ni cuentas externas. Consulta puestos remotos verificados acordes a tus preferencias. Cero envío de datos personales o privados.
+            </p>
+          </div>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button type="button" class="btn btn-outline btn-sm" id="btnToggleSourceAuth" onclick="toggleSourceAuthorization()">
+              🛡️ Autorizar Acceso a Remotive
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" id="btnRunSearchNow" onclick="runManualJobSearch()">
+              ⚡ Buscar Ofertas Ahora
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" id="btnTogglePeriodic" onclick="togglePeriodicSearch()">
+              ⏱️ Activar Búsqueda Automática
+            </button>
+          </div>
         </div>
 
+        <!-- PROTOCOLO DE CONSENTIMIENTO Y TRANSPARENCIA -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; font-size: 0.8rem; background: #0b1120; padding: 0.75rem; border-radius: 0.375rem; border: 1px solid var(--card-border);">
+          <div>
+            <strong style="color: var(--text-muted); display: block;">Fuente Pública:</strong>
+            <span id="lblSourceDomain">https://remotive.com (software-dev)</span>
+          </div>
+          <div>
+            <strong style="color: var(--text-muted); display: block;">Datos Enviados:</strong>
+            <span style="color: #10b981;">Solo parámetros GET tecnológicos ('software-dev', query). Cero PII.</span>
+          </div>
+          <div>
+            <strong style="color: var(--text-muted); display: block;">Última Búsqueda:</strong>
+            <span id="lblSearchLastRun">No ejecutada aún</span>
+          </div>
+          <div>
+            <strong style="color: var(--text-muted); display: block;">Próxima Búsqueda:</strong>
+            <span id="lblSearchNextRun">No programada</span>
+          </div>
+        </div>
+
+        <div id="boxSearchError" style="display: none; margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 0.375rem; font-size: 0.85rem; color: #fca5a5;">
+          <strong>Error en última búsqueda:</strong> <span id="lblSearchErrorMsg"></span>
+        </div>
+      </div>
+
+      <div class="grid" style="align-items: flex-start;">
+        <!-- COLUMNA IZQUIERDA: PREFERENCIAS PERSISTENTES DE BÚSQUEDA -->
+        <div class="card" style="max-width: 420px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
+            <h2 style="font-size: 1.1rem; margin: 0;">Preferencias de Búsqueda</h2>
+            <button type="button" class="btn btn-outline btn-sm" onclick="loadSearchPreferences()">Recargar</button>
+          </div>
+          <form id="frmSearchPreferences" onsubmit="saveSearchPreferences(event)">
+            <div class="form-group">
+              <label>Puestos Deseados (separados por coma)</label>
+              <input type="text" id="prefDesiredTitles" required placeholder="Python Backend Engineer, Desarrollador Software">
+            </div>
+            <div class="form-group">
+              <label>Habilidades Clave (separadas por coma)</label>
+              <input type="text" id="prefSkills" placeholder="Python, FastAPI, SQLAlchemy, Docker, PostgreSQL">
+            </div>
+            <div class="form-group">
+              <label>Ubicaciones Preferidas</label>
+              <input type="text" id="prefLocations" placeholder="Remoto, Worldwide, LATAM, Mexico">
+            </div>
+            <div class="form-group">
+              <label>Modalidad de Trabajo</label>
+              <div style="display: flex; gap: 1rem; margin-top: 0.25rem;">
+                <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; cursor: pointer;">
+                  <input type="checkbox" id="prefModRemote" value="remote" checked> Remoto
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; cursor: pointer;">
+                  <input type="checkbox" id="prefModHybrid" value="hybrid"> Híbrido
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; cursor: pointer;">
+                  <input type="checkbox" id="prefModOnsite" value="onsite"> Presencial
+                </label>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+              <div class="form-group">
+                <label>Nivel de Experiencia</label>
+                <select id="prefExpLevel">
+                  <option value="junior">Junior (0-2 años)</option>
+                  <option value="mid_senior" selected>Mid-Senior (3-5 años)</option>
+                  <option value="senior">Senior (5+ años)</option>
+                  <option value="lead">Lead / Principal</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Salario Mínimo</label>
+                <div style="display: flex; gap: 0.25rem;">
+                  <input type="number" id="prefSalaryMin" placeholder="Ej. 60000" style="flex: 2;">
+                  <select id="prefSalaryCurrency" style="flex: 1;">
+                    <option value="USD" selected>USD</option>
+                    <option value="EUR">EUR</option>
+                    <option value="MXN">MXN</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- EXCLUSIONES DECLARADAS -->
+            <div style="background: #0f172a; padding: 0.75rem; border-radius: 0.375rem; border: 1px solid var(--card-border); margin-bottom: 1rem;">
+              <strong style="font-size: 0.85rem; color: #f87171; display: block; margin-bottom: 0.5rem;">Filtros de Exclusión (Descarte Automático)</strong>
+              <div class="form-group" style="margin-bottom: 0.5rem;">
+                <label style="font-size: 0.78rem;">Palabras clave prohibidas</label>
+                <input type="text" id="prefExcludedKeywords" placeholder="apuestas, casino, crypto trading, comision">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size: 0.78rem;">Empresas excluidas</label>
+                <input type="text" id="prefExcludedCompanies" placeholder="EmpresaSpam, EmpresaVetada">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Intervalo de Búsqueda Periódica (Horas)</label>
+              <select id="prefIntervalHours">
+                <option value="6">Cada 6 horas</option>
+                <option value="12">Cada 12 horas</option>
+                <option value="24" selected>Cada 24 horas (Diaria)</option>
+                <option value="48">Cada 48 horas</option>
+              </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btnSavePreferences" style="width: 100%;">
+              💾 Guardar Preferencias
+            </button>
+          </form>
+
+          <!-- SECCIÓN COLAPSABLE: IMPORTAR VACANTE MANUALMENTE -->
+          <details style="margin-top: 1.5rem; border-top: 1px solid var(--card-border); padding-top: 1rem;">
+            <summary style="cursor: pointer; font-size: 0.85rem; color: var(--primary); font-weight: 600;">
+              ➕ Registrar Vacante Manualmente (URL / Formulario)
+            </summary>
+            <form id="frmVacancy" onsubmit="importVacancy(event)" style="margin-top: 1rem;">
+              <div class="form-group">
+                <label>Empresa</label>
+                <input type="text" id="vacCompany" required placeholder="Tech Corp">
+              </div>
+              <div class="form-group">
+                <label>Título del Puesto</label>
+                <input type="text" id="vacTitle" required placeholder="Senior Backend Engineer">
+              </div>
+              <div class="form-group">
+                <label>URL Original (Protegida anti-SSRF)</label>
+                <input type="url" id="vacUrl" required placeholder="https://careers.techcorp.com/job/42">
+              </div>
+              <div class="form-group">
+                <label>Requisitos (separados por coma)</label>
+                <input type="text" id="vacReqs" placeholder="Python, FastAPI, SQL, Docker">
+              </div>
+              <div class="form-group">
+                <label>Descripción</label>
+                <textarea id="vacDesc" placeholder="Detalles de la posición..."></textarea>
+              </div>
+              <div class="form-group">
+                <label>Fecha de Cierre (Opcional)</label>
+                <input type="date" id="vacClosingDate">
+              </div>
+              <button type="submit" class="btn btn-outline btn-sm" style="width: 100%;">Registrar Vacante Manual</button>
+            </form>
+          </details>
+        </div>
+
+        <!-- COLUMNA DERECHA: TABLA DE OFERTAS ENCONTRADAS CON COMPATIBILIDAD Y TRAZABILIDAD -->
         <div class="card" style="flex: 2;">
-          <h2>Vacantes Registradas</h2>
-          <table id="tblVacancies">
-            <thead>
-              <tr>
-                <th>Puesto / Empresa</th>
-                <th>Estado</th>
-                <th>URL Origen</th>
-                <th>Requisitos</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Sin vacantes importadas.</td></tr>
-            </tbody>
-          </table>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <h2 style="font-size: 1.15rem; margin: 0;">Ofertas de Empleo Disponibles</h2>
+              <span style="font-size: 0.78rem; color: var(--text-muted);" id="lblVacanciesCount">Cargando ofertas...</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button class="btn btn-outline btn-sm" onclick="loadVacancies()">🔄 Actualizar Tabla</button>
+            </div>
+          </div>
+
+          <div style="overflow-x: auto;">
+            <table id="tblVacancies" style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr>
+                  <th style="min-width: 200px;">Puesto / Empresa</th>
+                  <th style="min-width: 130px;">Compatibilidad Perfil</th>
+                  <th style="min-width: 110px;">Estado & Vigencia</th>
+                  <th style="min-width: 150px;">Trazabilidad & Fechas</th>
+                  <th style="min-width: 140px;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">Sin vacantes registradas.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
@@ -1005,8 +1157,82 @@
           </div>
         </div>
       </div>
+    <!-- TAB 11: RESPALDOS Y RESTAURACIÓN (REQ-033, D1) -->
+    <section id="tab-backups" class="tab-content">
+      <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.85rem; color: #fbbf24; display: flex; align-items: center; gap: 0.75rem;">
+        <span style="font-size: 1.25rem;">🔒</span>
+        <div>
+          <strong>Aviso de Seguridad:</strong> La función de restauración desde la interfaz web y API ordinaria se encuentra <em>temporalmente deshabilitada</em> mientras se valida el aislamiento estricto multi-tenant. La creación de respaldos aislados y la verificación criptográfica SHA-256 continúan operativas.
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h2 style="margin: 0 0 0.25rem 0;">Copias de Seguridad y Restauración (REQ-033)</h2>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0;">
+              Respaldos atómicos locales consistentes de SQLite y documentos (PDF, DOCX) con verificación criptográfica SHA-256 y rollback automático.
+            </p>
+          </div>
+          <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <label style="font-size: 0.85rem; display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-muted);">
+              <input type="checkbox" id="chkIncludeDocsBackup" checked> Incluir documentos y bóveda
+            </label>
+            <button class="btn btn-primary btn-sm" onclick="createBackupFromUI()">📦 Crear Nuevo Respaldo</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3 style="margin: 0;">Respaldos Disponibles en Disco</h3>
+            <button class="btn btn-outline btn-sm" onclick="loadBackups()">🔄 Actualizar</button>
+          </div>
+          <div id="backupsListContainer" style="overflow-x: auto;">
+            <table id="tblBackups">
+              <thead>
+                <tr>
+                  <th>Archivo</th>
+                  <th>Fecha (UTC)</th>
+                  <th>Tamaño</th>
+                  <th>Archivos</th>
+                  <th style="text-align: right;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="tbBackupsBody">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Cargando respaldos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top: 0; margin-bottom: 1rem;">Historial Inmutable de Auditoría</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Trazabilidad auditada de creación y restauración conforme a SEC-006.
+          </p>
+          <div id="backupAuditLogsContainer" style="max-height: 400px; overflow-y: auto;">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Cargando registros...</div>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
+
+  <!-- MODAL: RESULTADO DE VERIFICACIÓN DE RESPALDO -->
+  <div id="modalVerifyBackup" class="modal-backdrop" style="display: none;">
+    <div class="modal" style="max-width: 600px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Resultado de Verificación de Integridad</h3>
+        <button class="btn btn-outline btn-sm" onclick="closeVerifyBackupModal()">✕</button>
+      </div>
+      <div id="verifyBackupDetails"></div>
+      <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
+        <button class="btn btn-outline btn-sm" onclick="closeVerifyBackupModal()">Cerrar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL: REPORTE DIARIO POR CORREO (REQ-028) -->
   <div id="modalDailyEmailReport" class="modal-backdrop" style="display: none;">
@@ -1038,6 +1264,27 @@
       <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
         <button class="btn btn-outline btn-sm" onclick="closeDailyReportModal()">Cerrar</button>
         <button class="btn btn-primary btn-sm" id="btnSendDailyEmailReport" onclick="dispatchDailyEmailReport()">📧 Enviar Reporte (Simulado)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: LINKEDIN MODO ASISTIDO (REQ-024) -->
+  <div id="modalLinkedInAssisted" class="modal-backdrop" style="display: none;">
+    <div class="modal" style="max-width: 750px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; margin-bottom: 1rem;">
+        <h2 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+          <span style="background: #0077b5; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">in</span>
+          Modo Asistido LinkedIn (REQ-024)
+        </h2>
+        <button class="btn btn-outline btn-sm" onclick="closeLinkedInAssistedModal()">✕ Cerrar</button>
+      </div>
+
+      <div style="background: rgba(0, 119, 181, 0.1); border: 1px solid #0077b5; border-radius: 0.375rem; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; color: #38bdf8;">
+        <strong>Operación Asistida Segura:</strong> Conforme al principio de seguridad y términos de servicio, LinkedIn no permite bots automáticos de envío. Este asistente prepara tus respuestas, documentos y carta adaptada con 1-clic para que envíes con total control desde tu navegador.
+      </div>
+
+      <div id="linkedinAssistedContent">
+        <!-- Rendered dynamically -->
       </div>
     </div>
   </div>
@@ -1346,13 +1593,14 @@
 
       if (tabId === "tab-dashboard") loadDashboardMetrics();
       if (tabId === "tab-crm") loadCRM();
-      if (tabId === "tab-vacancies") loadVacancies();
+      if (tabId === "tab-vacancies") { loadVacancies(); loadSearchPreferences(); }
       if (tabId === "tab-execution") loadTasks();
       if (tabId === "tab-cv-import") loadCVImportData();
       if (tabId === "tab-master-cvs") { loadMasterCVsList(); loadVerifiedSkillsForForm(); }
       if (tabId === "tab-communication") loadCommunicationData();
       if (tabId === "tab-profile") loadProfileData();
       if (tabId === "tab-ai-config") loadAIConfig();
+      if (tabId === "tab-backups") loadBackups();
     }
 
     function toggleAuthModal(show = null) {
@@ -2135,15 +2383,226 @@
       }
     }
 
+    let currentSearchPreferences = null;
+
+    async function loadSearchPreferences() {
+      if (!authToken) return;
+      try {
+        const pref = await apiRequest("/api/v1/vacancies/preferences");
+        if (!pref) return;
+        currentSearchPreferences = pref;
+
+        // Campos del formulario
+        const titlesInput = document.getElementById("prefDesiredTitles");
+        if (titlesInput) titlesInput.value = (pref.desired_job_titles || []).join(", ");
+
+        const skillsInput = document.getElementById("prefSkills");
+        if (skillsInput) skillsInput.value = (pref.skills || []).join(", ");
+
+        const locsInput = document.getElementById("prefLocations");
+        if (locsInput) locsInput.value = (pref.locations || []).join(", ");
+
+        const mods = pref.remote_modalities || ["remote"];
+        if (document.getElementById("prefModRemote")) document.getElementById("prefModRemote").checked = mods.includes("remote");
+        if (document.getElementById("prefModHybrid")) document.getElementById("prefModHybrid").checked = mods.includes("hybrid");
+        if (document.getElementById("prefModOnsite")) document.getElementById("prefModOnsite").checked = mods.includes("onsite");
+
+        if (document.getElementById("prefExpLevel")) document.getElementById("prefExpLevel").value = pref.experience_level || "mid_senior";
+        if (document.getElementById("prefSalaryMin")) document.getElementById("prefSalaryMin").value = pref.salary_min !== null ? pref.salary_min : "";
+        if (document.getElementById("prefSalaryCurrency")) document.getElementById("prefSalaryCurrency").value = pref.salary_currency || "USD";
+
+        if (document.getElementById("prefExcludedKeywords")) document.getElementById("prefExcludedKeywords").value = (pref.excluded_keywords || []).join(", ");
+        if (document.getElementById("prefExcludedCompanies")) document.getElementById("prefExcludedCompanies").value = (pref.excluded_companies || []).join(", ");
+        if (document.getElementById("prefIntervalHours")) document.getElementById("prefIntervalHours").value = String(pref.interval_hours || 24);
+
+        // Badges y metadatos de autorización
+        const authBadge = document.getElementById("badgeSourceAuth");
+        const btnToggleAuth = document.getElementById("btnToggleSourceAuth");
+        if (authBadge && btnToggleAuth) {
+          if (pref.source_access_authorized) {
+            authBadge.className = "badge badge-confirmed";
+            authBadge.innerText = "✓ Acceso a Red Autorizado (Remotive)";
+            btnToggleAuth.innerText = "🔒 Revocar Acceso a Red";
+            btnToggleAuth.className = "btn btn-outline btn-sm";
+          } else {
+            authBadge.className = "badge badge-pending";
+            authBadge.innerText = "Modo Local Seguro (Sin Red)";
+            btnToggleAuth.innerText = "🛡️ Autorizar Acceso a Remotive";
+            btnToggleAuth.className = "btn btn-outline btn-sm";
+          }
+        }
+
+        const periodicBadge = document.getElementById("badgePeriodicStatus");
+        const btnTogglePeriodic = document.getElementById("btnTogglePeriodic");
+        if (periodicBadge && btnTogglePeriodic) {
+          if (pref.is_periodic_enabled) {
+            periodicBadge.className = "badge badge-confirmed";
+            periodicBadge.innerText = `⏱️ Periódica Activa (c/${pref.interval_hours}h)`;
+            btnTogglePeriodic.innerText = "⏸️ Pausar Búsqueda Automática";
+          } else {
+            periodicBadge.className = "badge";
+            periodicBadge.style.background = "rgba(148, 163, 184, 0.2)";
+            periodicBadge.style.color = "#94a3b8";
+            periodicBadge.innerText = "Periódica: Inactiva";
+            btnTogglePeriodic.innerText = "⏱️ Activar Búsqueda Automática";
+          }
+        }
+
+        // Trazabilidad de ejecución
+        const lastRunEl = document.getElementById("lblSearchLastRun");
+        if (lastRunEl) {
+          lastRunEl.innerText = pref.last_run_at 
+            ? `${new Date(pref.last_run_at).toLocaleString()} (${pref.last_results_count || 0} encontradas, ${pref.last_new_jobs_count || 0} nuevas)`
+            : "No ejecutada aún";
+        }
+
+        const nextRunEl = document.getElementById("lblSearchNextRun");
+        if (nextRunEl) {
+          nextRunEl.innerText = pref.next_run_at 
+            ? new Date(pref.next_run_at).toLocaleString()
+            : "No programada";
+        }
+
+        const errBox = document.getElementById("boxSearchError");
+        if (errBox) {
+          if (pref.last_status === "error" && pref.last_error) {
+            errBox.style.display = "block";
+            document.getElementById("lblSearchErrorMsg").innerText = pref.last_error;
+          } else {
+            errBox.style.display = "none";
+          }
+        }
+      } catch (err) {
+        console.error("Error al cargar preferencias de búsqueda:", err);
+      }
+    }
+
+    async function saveSearchPreferences(e) {
+      e.preventDefault();
+      const mods = [];
+      if (document.getElementById("prefModRemote").checked) mods.push("remote");
+      if (document.getElementById("prefModHybrid").checked) mods.push("hybrid");
+      if (document.getElementById("prefModOnsite").checked) mods.push("onsite");
+
+      const sMinVal = document.getElementById("prefSalaryMin").value;
+      const payload = {
+        desired_job_titles: document.getElementById("prefDesiredTitles").value.split(",").map(s => s.trim()).filter(Boolean),
+        skills: document.getElementById("prefSkills").value.split(",").map(s => s.trim()).filter(Boolean),
+        locations: document.getElementById("prefLocations").value.split(",").map(s => s.trim()).filter(Boolean),
+        remote_modalities: mods.length > 0 ? mods : ["remote"],
+        experience_level: document.getElementById("prefExpLevel").value,
+        salary_min: sMinVal ? parseFloat(sMinVal) : null,
+        salary_currency: document.getElementById("prefSalaryCurrency").value,
+        excluded_keywords: document.getElementById("prefExcludedKeywords").value.split(",").map(s => s.trim()).filter(Boolean),
+        excluded_companies: document.getElementById("prefExcludedCompanies").value.split(",").map(s => s.trim()).filter(Boolean),
+        interval_hours: parseInt(document.getElementById("prefIntervalHours").value, 10) || 24,
+      };
+
+      const res = await apiRequest("/api/v1/vacancies/preferences", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      if (res) {
+        showToast("✓ Preferencias de búsqueda actualizadas.");
+        loadSearchPreferences();
+      }
+    }
+
+    async function toggleSourceAuthorization() {
+      if (!currentSearchPreferences) return;
+      const isAuth = currentSearchPreferences.source_access_authorized;
+      if (!isAuth) {
+        // Modal de consentimiento previo informado
+        const ok = confirm(
+          "AUTORIZACIÓN DE ACCESO A FUENTE EXTERNA:\n\n" +
+          "• Destino: API pública de Remotive (https://remotive.com)\n" +
+          "• Datos que salen: Parámetros GET tecnológicos ('software-dev', títulos y habilidades deseadas).\n" +
+          "• Cero datos personales, cero documentos y cero credenciales.\n" +
+          "• Sin costo ni necesidad de cuenta.\n\n" +
+          "¿Deseas autorizar las consultas de lectura a Remotive?"
+        );
+        if (!ok) return;
+
+        const res = await apiRequest("/api/v1/vacancies/preferences/authorize-source", {
+          method: "POST",
+          body: JSON.stringify({ source_name: "remotive", confirm: true }),
+        });
+        if (res) {
+          showToast("✓ Acceso a Remotive autorizado correctamente.");
+          loadSearchPreferences();
+        }
+      } else {
+        const ok = confirm("¿Revocar la autorización de acceso a Remotive? El sistema volverá al modo local seguro sin salida a red.");
+        if (!ok) return;
+
+        const res = await apiRequest("/api/v1/vacancies/preferences/revoke-source", {
+          method: "POST",
+          body: JSON.stringify({ source_name: "remotive" }),
+        });
+        if (res) {
+          showToast("Modo local seguro activo: salida a red revocada.");
+          loadSearchPreferences();
+        }
+      }
+    }
+
+    async function runManualJobSearch() {
+      const btn = document.getElementById("btnRunSearchNow");
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerText = "⏳ Buscando ofertas...";
+
+      try {
+        const res = await apiRequest("/api/v1/vacancies/search/run", { method: "POST" });
+        if (res) {
+          const modeStr = res.is_real_network_call ? "en red (Remotive)" : "muestra estructurada (local)";
+          showToast(
+            `Búsqueda completada (${modeStr}): ${res.jobs_found} encontradas, ` +
+            `${res.jobs_new} nuevas, ${res.jobs_duplicate} duplicadas, ${res.jobs_excluded} excluidas.`
+          );
+          loadSearchPreferences();
+          loadVacancies();
+        }
+      } catch (err) {
+        showToast("Error en búsqueda de empleo: " + err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+
+    async function togglePeriodicSearch() {
+      if (!currentSearchPreferences) return;
+      const willEnable = !currentSearchPreferences.is_periodic_enabled;
+      if (willEnable && !currentSearchPreferences.source_access_authorized) {
+        alert("Para activar la búsqueda automática periódica, primero autoriza el acceso a la fuente externa Remotive.");
+        return;
+      }
+
+      const res = await apiRequest("/api/v1/vacancies/search/toggle-periodic", {
+        method: "POST",
+        body: JSON.stringify({ enabled: willEnable }),
+      });
+      if (res) {
+        showToast(willEnable ? "⏱️ Búsqueda periódica activada." : "Búsqueda periódica pausada.");
+        loadSearchPreferences();
+      }
+    }
+
     async function loadVacancies() {
       if (!authToken) return;
       const vacancies = await apiRequest("/api/v1/vacancies");
       const tb = document.querySelector("#tblVacancies tbody");
+      const countLbl = document.getElementById("lblVacanciesCount");
       if (!vacancies || vacancies.length === 0) {
-        tb.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Sin vacantes registradas.</td></tr>';
+        if (countLbl) countLbl.innerText = "0 ofertas registradas";
+        tb.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">Sin vacantes registradas. Usa "Buscar Ofertas Ahora" o importa una manualmente.</td></tr>';
         return;
       }
+      if (countLbl) countLbl.innerText = `${vacancies.length} ofertas disponibles`;
+
       tb.innerHTML = vacancies.map(v => {
+        // Estado y vigencia (REQ-009)
         let statusBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">✓ Activa</span>`;
         if (v.is_fraud_suspect) {
           const titles = (v.fraud_signals || []).map(s => escapeHtml(s.title)).join(" | ");
@@ -2152,16 +2611,70 @@
           statusBadge = `<span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8;" title="${escapeHtml(v.closure_reason || 'Cerrada')}">🚫 Cerrada</span>`;
         }
 
+        // Badge de fuente (Real vs Muestra)
+        const sourceBadge = v.is_real_search_result 
+          ? `<span class="badge badge-confirmed" style="font-size: 0.7rem;">🌐 ${escapeHtml(v.source)} (Real)</span>`
+          : `<span class="badge" style="font-size: 0.7rem; background: #1e293b; color: #94a3b8;">📦 ${escapeHtml(v.source || 'local')}</span>`;
+
+        // Compatibilidad con perfil
+        let compatHtml = '<span style="color: var(--text-muted); font-size: 0.8rem;">Sin evaluar</span>';
+        if (v.compatibility_score !== undefined && v.compatibility_score !== null) {
+          const pct = Math.round(v.compatibility_score * 100);
+          let color = "#10b981";
+          if (pct < 40) color = "#ef4444";
+          else if (pct < 70) color = "#f59e0b";
+
+          const matchedChips = (v.matched_skills || []).slice(0, 3).map(m => {
+            const name = typeof m === 'object' ? (m.matched_skill || m.requirement) : m;
+            return `<span style="background: rgba(16, 185, 129, 0.15); color: #10b981; padding: 0.1rem 0.35rem; border-radius: 0.2rem; font-size: 0.72rem;">${escapeHtml(name)}</span>`;
+          }).join(" ");
+
+          compatHtml = `
+            <div>
+              <span style="font-weight: 700; color: ${color}; font-size: 0.95rem;">${pct}%</span>
+              <span style="font-size: 0.75rem; color: var(--text-muted);"> (${escapeHtml(v.recommendation || '')})</span>
+              <div style="display: flex; gap: 0.2rem; flex-wrap: wrap; margin-top: 0.25rem;">${matchedChips}</div>
+            </div>
+          `;
+        }
+
+        // Trazabilidad y Fechas
+        const postedStr = v.posted_date ? escapeHtml(v.posted_date) : '<span style="color: var(--text-muted); font-size: 0.75rem;">No informada</span>';
+        const fetchedStr = v.fetched_at ? new Date(v.fetched_at).toLocaleDateString() : '-';
+        const urlShort = (v.source_url || '').replace(/^https?:\/\//, '').substring(0, 22) + '...';
+
         return `
           <tr>
-            <td><strong>${escapeHtml(v.job_title)}</strong><br><span style="color: var(--text-muted);">${escapeHtml(v.company_name)}</span></td>
-            <td>${statusBadge}</td>
-            <td><a href="${escapeHtml(v.source_url)}" target="_blank" style="color: var(--primary); font-size: 0.8rem;">${escapeHtml(v.source_url.substring(0, 30))}...</a></td>
-            <td>${(v.requirements || []).map(escapeHtml).join(", ") || "-"}</td>
             <td>
-              <div style="display: flex; gap: 0.3rem;">
-                <button class="btn btn-outline btn-sm" onclick="evaluateAndPrepare('${v.id}')">⚡ Evaluar</button>
-                <button class="btn btn-outline btn-sm" onclick="reverifyVacancyStatus('${v.id}')" title="Re-verificar integridad y fraude">🔍</button>
+              <div style="display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.2rem; flex-wrap: wrap;">
+                <strong>${escapeHtml(v.job_title)}</strong>
+                ${sourceBadge}
+              </div>
+              <div style="font-size: 0.82rem; color: var(--text-muted);">
+                ${escapeHtml(v.company_name)} • <span>${escapeHtml(v.location || 'Remoto')}</span>
+                ${v.salary_min ? ` • <strong>$${v.salary_min.toLocaleString()} ${escapeHtml(v.salary_currency || '')}</strong>` : ''}
+              </div>
+            </td>
+            <td>${compatHtml}</td>
+            <td>
+              ${statusBadge}
+              ${v.closure_reason ? `<div style="font-size: 0.72rem; color: #f87171; margin-top: 0.2rem;">${escapeHtml(v.closure_reason)}</div>` : ''}
+            </td>
+            <td style="font-size: 0.8rem;">
+              <div><strong>Pub:</strong> ${postedStr}</div>
+              <div style="color: var(--text-muted);"><strong>Consulta:</strong> ${fetchedStr}</div>
+              <a href="${escapeHtml(v.source_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--primary); font-size: 0.75rem; display: inline-block; margin-top: 0.2rem;" title="${escapeHtml(v.source_url)}">
+                🔗 ${escapeHtml(urlShort)}
+              </a>
+            </td>
+            <td>
+              <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+                <button class="btn btn-primary btn-sm" onclick="evaluateAndPrepare('${v.id}')" style="font-size: 0.78rem; padding: 0.25rem 0.5rem;">
+                  ⚡ Preparar Candidatura
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="reverifyVacancyStatus('${v.id}')" style="font-size: 0.72rem; padding: 0.2rem 0.4rem;" title="Re-verificar integridad y vigencia">
+                  🔍 Re-verificar
+                </button>
               </div>
             </td>
           </tr>
@@ -2423,6 +2936,7 @@
           <div style="display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center; border-top: 1px solid var(--card-border); padding-top: 1rem; flex-wrap: wrap;">
             <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/candidacies/${c.id}/export/pdf', 'Candidatura_${c.id.substring(0,8)}_CV.pdf')">📄 Descargar CV (PDF)</button>
             <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/candidacies/${c.id}/export/docx', 'Candidatura_${c.id.substring(0,8)}_CV.docx')">📝 Descargar CV (DOCX)</button>
+            <button class="btn btn-primary btn-sm" onclick="openLinkedInAssistedModal('${c.id}')">💼 Modo Asistido LinkedIn</button>
             <button id="btnRejectCandidacy" class="btn btn-danger btn-sm" onclick="rejectCandidacy('${c.id}')">Rechazar Definitivamente</button>
             <button id="btnApproveCandidacy" class="btn btn-success" onclick="approveCandidacy('${c.id}')">Aprobar para Mañana 🚀</button>
           </div>
@@ -3218,6 +3732,273 @@
       }
     }
 
+    async function openLinkedInAssistedModal(candidacyId) {
+      if (!authToken) {
+        showToast("Por favor inicia sesión primero.", true);
+        return;
+      }
+      try {
+        showToast("Cargando paquete asistido de LinkedIn...");
+        const pkg = await apiRequest(`/api/v1/candidacies/${candidacyId}/linkedin-assisted`);
+        if (!pkg) return;
+
+        const cont = document.getElementById("linkedinAssistedContent");
+        const screeningAnswers = (pkg.checklist && pkg.checklist.find(c => c.id === 'step_answer_questions')?.answers) || {};
+        const screeningHtml = Object.entries(screeningAnswers).map(([k, v]) => `
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); padding: 0.5rem; border-radius: 4px;">
+            <span style="color: #94a3b8; display: block; font-size: 0.75rem;">${k}</span>
+            <strong style="color: #f8fafc;">${v}</strong>
+          </div>
+        `).join('');
+
+        cont.innerHTML = `
+          <div style="margin-bottom: 1.25rem;">
+            <div style="font-size: 1.1rem; font-weight: bold; color: #f8fafc;">${pkg.job_title}</div>
+            <div style="color: #94a3b8; font-size: 0.88rem;">Empresa: ${pkg.company_name} | Estado actual: <span class="badge ${pkg.is_confirmed ? 'badge-verified' : 'badge-pending'}">${pkg.candidacy_status}</span></div>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+            <h4 style="margin: 0 0 0.5rem 0; color: #38bdf8;">Paso 1: Abrir la publicación en LinkedIn</h4>
+            <p style="font-size: 0.83rem; color: #94a3b8; margin-bottom: 0.75rem;">Abre el enlace directo sanitizado en una nueva pestaña segura.</p>
+            ${pkg.is_safe_url ? `
+              <a href="${pkg.target_url}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                🔗 Abrir vacante en LinkedIn (nueva pestaña) ↗
+              </a>
+            ` : `<div style="color: #f87171; font-size: 0.85rem;">URL no permitida por seguridad: ${pkg.url_reason}</div>`}
+          </div>
+
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+            <h4 style="margin: 0 0 0.5rem 0; color: #38bdf8;">Paso 2: Descargar CV Especializado</h4>
+            <p style="font-size: 0.83rem; color: #94a3b8; margin-bottom: 0.75rem;">Descarga el PDF congelado con verificación SHA-256 para adjuntarlo en LinkedIn.</p>
+            <div style="display: flex; gap: 0.5rem;">
+              <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/candidacies/${pkg.candidacy_id}/export/pdf', 'Candidatura_${pkg.candidacy_id.substring(0,8)}_CV.pdf')">📄 Descargar CV (PDF)</button>
+              <button class="btn btn-outline btn-sm" onclick="downloadCVDocument('/api/v1/candidacies/${pkg.candidacy_id}/export/docx', 'Candidatura_${pkg.candidacy_id.substring(0,8)}_CV.docx')">📝 Descargar CV (DOCX)</button>
+            </div>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <h4 style="margin: 0; color: #38bdf8;">Paso 3: Carta / Nota Personalizada</h4>
+              <button class="btn btn-outline btn-sm" onclick="copyLinkedInText('txtLiCoverLetter', 'Carta de presentación')">📋 Copiar Carta</button>
+            </div>
+            <textarea id="txtLiCoverLetter" style="height: 120px; font-size: 0.82rem;" readonly>${pkg.cover_letter || ""}</textarea>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 6px; padding: 1rem; margin-bottom: 1.25rem;">
+            <h4 style="margin: 0 0 0.5rem 0; color: #38bdf8;">Paso 4: Respuestas de Filtrado (Screening)</h4>
+            <div id="liScreeningContainer" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.82rem;">
+              ${screeningHtml}
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid var(--card-border); padding-top: 1rem;">
+            <h4 style="margin: 0 0 0.5rem 0; color: #34d399;">Paso 5: Confirmar Envío Realizado</h4>
+            <p style="font-size: 0.83rem; color: #94a3b8; margin-bottom: 0.75rem;">Una vez enviada la solicitud en LinkedIn, confirma el envío para actualizar el CRM.</p>
+            <div class="form-group" style="margin-bottom: 0.75rem;">
+              <label style="font-size: 0.8rem;">Referencia / Número de Confirmación o Enlace (Opcional)</label>
+              <input type="text" id="txtLinkedInRef" placeholder="Ej: LI-CONFIRM-123 o Enlace de postulación" style="font-size: 0.85rem;">
+            </div>
+            <div class="form-group" style="margin-bottom: 1rem;">
+              <label style="font-size: 0.8rem;">Notas del Envío</label>
+              <input type="text" id="txtLinkedInNote" placeholder="Ej: Postulación enviada con CV adaptado v1" style="font-size: 0.85rem;">
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+              <button class="btn btn-outline btn-sm" onclick="closeLinkedInAssistedModal()">Cerrar</button>
+              <button class="btn btn-success btn-sm" id="btnConfirmLinkedIn" onclick="submitLinkedInConfirmation('${pkg.candidacy_id}')">
+                ✅ Confirmar Envío en LinkedIn
+              </button>
+            </div>
+          </div>
+        `;
+
+        document.getElementById("modalLinkedInAssisted").style.display = "flex";
+      } catch (err) {
+        showToast("Error al cargar modo asistido: " + err.message, true);
+      }
+    }
+
+    function closeLinkedInAssistedModal() {
+      document.getElementById("modalLinkedInAssisted").style.display = "none";
+    }
+
+    function copyLinkedInText(elementId, label) {
+      const el = document.getElementById(elementId);
+      if (el) {
+        navigator.clipboard.writeText(el.value).then(() => {
+          showToast(`¡${label} copiada al portapapeles!`);
+        }).catch(() => {
+          showToast("No se pudo copiar automáticamente.", true);
+        });
+      }
+    }
+
+    async function submitLinkedInConfirmation(candidacyId) {
+      const ref = document.getElementById("txtLinkedInRef") ? document.getElementById("txtLinkedInRef").value.trim() : null;
+      const note = document.getElementById("txtLinkedInNote") ? document.getElementById("txtLinkedInNote").value.trim() : null;
+      const btn = document.getElementById("btnConfirmLinkedIn");
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = "Registrando...";
+      }
+
+      try {
+        const res = await apiRequest(`/api/v1/candidacies/${candidacyId}/linkedin-confirm`, {
+          method: "POST",
+          body: JSON.stringify({ external_reference: ref || null, confirmation_note: note || null })
+        });
+        showToast("¡Postulación en LinkedIn confirmada con éxito!");
+        closeLinkedInAssistedModal();
+        await loadCRM();
+        await loadTasks();
+        await inspectCandidacy(candidacyId);
+      } catch (err) {
+        showToast("Error al confirmar: " + err.message, true);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = "✅ Confirmar Envío en LinkedIn";
+        }
+      }
+    }
+
+    function formatBytesUI(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    async function loadBackups() {
+      const tbBody = document.getElementById("tbBackupsBody");
+      const auditContainer = document.getElementById("backupAuditLogsContainer");
+      if (!tbBody) return;
+
+      try {
+        const backups = await apiRequest("/api/v1/backups");
+        if (!backups || backups.length === 0) {
+          tbBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No hay respaldos creados todavía.</td></tr>';
+        } else {
+          tbBody.innerHTML = backups.map(b => {
+            const created = b.created_at ? b.created_at.replace("T", " ").substring(0, 19) : "N/A";
+            const sz = formatBytesUI(b.size_bytes);
+            return `
+              <tr>
+                <td><strong style="color: #93c5fd; font-family: monospace;">${escapeHtml(b.filename)}</strong></td>
+                <td style="color: var(--text-muted); font-size: 0.8rem;">${created}</td>
+                <td><span class="badge badge-scheduled">${sz}</span></td>
+                <td>${b.total_files || 'N/A'}</td>
+                <td style="text-align: right; white-space: nowrap;">
+                  <button class="btn btn-outline btn-sm" onclick="verifyBackupFromUI('${escapeHtml(b.filename)}')">🔍 Verificar</button>
+                  <button class="btn btn-outline btn-sm" style="opacity: 0.55; cursor: not-allowed;" title="Restauración deshabilitada temporalmente en interfaz por revisión de seguridad y aislamiento multi-tenant" onclick="restoreBackupFromUI('${escapeHtml(b.filename)}')" disabled>🔒 Restaurar</button>
+                </td>
+              </tr>
+            `;
+          }).join("");
+        }
+
+        // Cargar registros de auditoría
+        if (auditContainer) {
+          const logs = await apiRequest("/api/v1/backups/audit-logs");
+          if (!logs || logs.length === 0) {
+            auditContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem;">No hay registros de auditoría de respaldos.</div>';
+          } else {
+            auditContainer.innerHTML = logs.map(l => {
+              const dt = l.created_at ? l.created_at.replace("T", " ").substring(0, 19) : "N/A";
+              const isRestore = l.action.includes("restored");
+              const badgeClass = isRestore ? "badge-danger" : "badge-confirmed";
+              return `
+                <div style="background: #0f172a; border: 1px solid var(--card-border); border-radius: 0.375rem; padding: 0.6rem; margin-bottom: 0.5rem; font-size: 0.8rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                    <span class="badge ${badgeClass}">${escapeHtml(l.action)}</span>
+                    <span style="color: var(--text-muted); font-size: 0.75rem;">${dt}</span>
+                  </div>
+                  <div style="color: var(--text-muted);">Actor: <strong>${escapeHtml(l.actor)}</strong></div>
+                  ${l.details && l.details.filename ? `<div style="font-family: monospace; font-size: 0.75rem; color: #93c5fd; word-break: break-all;">${escapeHtml(l.details.filename)}</div>` : ''}
+                  ${l.details && l.details.source_file ? `<div style="font-family: monospace; font-size: 0.75rem; color: #fca5a5; word-break: break-all;">Origen: ${escapeHtml(l.details.source_file)}</div>` : ''}
+                </div>
+              `;
+            }).join("");
+          }
+        }
+      } catch (err) {
+        showToast("Error cargando respaldos: " + err.message, true);
+        if (tbBody) {
+          tbBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #ef4444;">Error: ${escapeHtml(err.message)}</td></tr>`;
+        }
+      }
+    }
+
+    async function createBackupFromUI() {
+      const chk = document.getElementById("chkIncludeDocsBackup");
+      const includeDocs = chk ? chk.checked : true;
+      try {
+        showToast("Generando respaldo local consistente...", false);
+        const res = await apiRequest("/api/v1/backups", "POST", { include_documents: includeDocs });
+        showToast("¡Respaldo creado con éxito! (" + formatBytesUI(res.size_bytes) + ")", false);
+        await loadBackups();
+      } catch (err) {
+        showToast("Error creando respaldo: " + err.message, true);
+      }
+    }
+
+    async function verifyBackupFromUI(filename) {
+      try {
+        showToast("Comprobando sumas SHA-256 e integridad SQLite...", false);
+        const res = await apiRequest("/api/v1/backups/verify", "POST", { filename });
+        const modal = document.getElementById("modalVerifyBackup");
+        const details = document.getElementById("verifyBackupDetails");
+        if (modal && details) {
+          let html = '';
+          if (res.is_valid) {
+            html = `
+              <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid #10b981; border-radius: 0.5rem; padding: 1rem; color: #34d399; margin-bottom: 1rem;">
+                <h4 style="margin: 0 0 0.5rem 0;">✅ Respaldo Totalmente Íntegro y Confiable</h4>
+                <p style="margin: 0; font-size: 0.85rem;">Todas las sumas SHA-256 de los archivos coinciden con el manifiesto y el motor SQLite pasó <code>PRAGMA integrity_check</code>.</p>
+              </div>
+              <table style="font-size: 0.85rem;">
+                <tr><td><strong>Archivo:</strong></td><td><code>${escapeHtml(filename)}</code></td></tr>
+                <tr><td><strong>ID Respaldo:</strong></td><td><code>${escapeHtml(res.backup_id || 'N/A')}</code></td></tr>
+                <tr><td><strong>Tenant:</strong></td><td>${escapeHtml(res.tenant_id || 'N/A')}</td></tr>
+                <tr><td><strong>Fecha Creación:</strong></td><td>${res.created_at_utc ? res.created_at_utc.replace('T', ' ').substring(0, 19) : 'N/A'}</td></tr>
+                <tr><td><strong>Archivos Verificados:</strong></td><td>${res.checked_files} / ${res.total_files}</td></tr>
+                <tr><td><strong>Seguridad TarSlip:</strong></td><td><span class="badge badge-verified">Validada (Sin path traversal)</span></td></tr>
+              </table>
+            `;
+          } else {
+            html = `
+              <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 0.5rem; padding: 1rem; color: #fca5a5; margin-bottom: 1rem;">
+                <h4 style="margin: 0 0 0.5rem 0;">❌ Falló la Verificación de Integridad</h4>
+                <p style="margin: 0; font-size: 0.85rem;">Se detectaron discrepancias o riesgo de corrupción en el respaldo:</p>
+                <ul style="margin: 0.5rem 0 0 1rem; padding: 0;">
+                  ${(res.errors || []).map(e => `<li>${escapeHtml(e)}</li>`).join("")}
+                </ul>
+              </div>
+            `;
+          }
+          details.innerHTML = html;
+          modal.style.display = "flex";
+        }
+      } catch (err) {
+        showToast("Error al verificar respaldo: " + err.message, true);
+      }
+    }
+
+    function closeVerifyBackupModal() {
+      const m = document.getElementById("modalVerifyBackup");
+      if (m) m.style.display = "none";
+    }
+
+    async function restoreBackupFromUI(filename) {
+      alert(
+        "🔒 RESTAURACIÓN DESHABILITADA TEMPORALMENTE\n\n" +
+        "La restauración desde la interfaz web y la API ordinaria se encuentra deshabilitada " +
+        "mientras se completa la revisión de seguridad y aislamiento estricto por tenant.\n\n" +
+        "Para realizar restauraciones utilice los scripts administrativos CLI autorizados en entorno seguro."
+      );
+      return;
+    }
+
     async function loadInitialData() {
       await loadDashboardMetrics();
       await loadProfileData();
@@ -3228,6 +4009,7 @@
       await loadCRM();
       await loadTasks();
       await loadAIConfig();
+      await loadBackups();
     }
 
     window.addEventListener("DOMContentLoaded", async () => {

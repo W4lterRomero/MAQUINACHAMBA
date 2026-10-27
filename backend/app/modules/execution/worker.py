@@ -309,8 +309,13 @@ class DurableExecutionWorker:
                     return False, f"Ejecución bloqueada: la vacante ha expirado ({vacancy.closing_date})."
 
         # 4.2 Verificación de modo simulación vs capacidades del adaptador (P1 - Simulación)
-        is_sim_adapter = getattr(self.portal, "simulation_mode", False) is True or getattr(self.portal, "CAPABILITIES", {}).get("mode") == "simulation_only"
-        adapter_mode = getattr(self.portal, "CAPABILITIES", {}).get("mode")
+        portal_adapter = self.portal
+        if isinstance(self.portal, MockPortalAdapter) and candidacy.target_portal and candidacy.target_portal != "mock_test_portal":
+            from backend.app.modules.portals.factory import get_portal_adapter
+            portal_adapter = get_portal_adapter(candidacy.target_portal, simulation_mode=self.simulation_mode)
+
+        is_sim_adapter = getattr(portal_adapter, "simulation_mode", False) is True or getattr(portal_adapter, "CAPABILITIES", {}).get("mode") in ("simulation_only", "assisted_only")
+        adapter_mode = getattr(portal_adapter, "CAPABILITIES", {}).get("mode")
 
         can_effect, reason_effect = AuthorizationPolicy.can_perform_live_effects(
             simulation_mode=self.simulation_mode,
@@ -416,7 +421,7 @@ class DurableExecutionWorker:
         sub_result = None
         transport_error = None
         try:
-            sub_result = await self.portal.submit_application(
+            sub_result = await portal_adapter.submit_application(
                 tenant_id=persisted_task.tenant_id,
                 target_url=candidacy.target_url,
                 applicant_data={"email": candidacy.form_responses.get("applicant_email", "")},

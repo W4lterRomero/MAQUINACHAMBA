@@ -170,6 +170,70 @@ async def test_reports_and_metrics_tenant_isolation(client: AsyncClient, test_te
     assert "User Reportes Dos" in rep2["text_body"]
 
 
+@pytest.mark.asyncio
+async def test_daily_email_html_escaping(client: AsyncClient):
+    """Verifica que el nombre de usuario se escapa contra XSS en la plantilla HTML del reporte."""
+    xss_tenant = f"xss-tenant-{uuid.uuid4().hex[:8]}"
+    xss_user_id = str(uuid.uuid4())
+
+    async with async_session_factory() as session:
+        t = Tenant(id=xss_tenant, tenant_id=xss_tenant, name="XSS Test Tenant")
+        session.add(t)
+        u = User(
+            id=xss_user_id,
+            tenant_id=xss_tenant,
+            email=f"xss_{uuid.uuid4().hex[:6]}@example.com",
+            hashed_password=hash_password("pw123456"),
+            full_name="<script>alert('xss')</script>",
+            is_active=True,
+        )
+        session.add(u)
+        await session.commit()
+
+    token = create_access_token(data={"sub": xss_user_id, "tenant_id": xss_tenant})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = await client.get("/api/v1/reports/daily-email/preview", headers=headers)
+    assert res.status_code == 200
+    report = res.json()
+    html_body = report["html_body"]
+    assert "<script>alert('xss')</script>" not in html_body
+    assert "&lt;script&gt;alert(" in html_body
+
+
+@pytest.mark.asyncio
+async def test_ai_budget_reserved_balance_deduction(client: AsyncClient, test_tenant_id: str, auth_headers: dict):
+    """Verifica que el saldo disponible descuenta el presupuesto reservado en vuelo."""
+    async with async_session_factory() as session:
+        cfg = (await session.execute(
+            select(APIKeyConfig).where(APIKeyConfig.tenant_id == test_tenant_id)
+        )).scalars().first()
+        if not cfg:
+            cfg = APIKeyConfig(
+                tenant_id=test_tenant_id,
+                provider="openai",
+                monthly_budget_usd=10.0,
+                current_month_usage_usd=2.0,
+                reserved_budget_usd=3.5,
+                is_active=True,
+            )
+            session.add(cfg)
+        else:
+            cfg.monthly_budget_usd = 10.0
+            cfg.current_month_usage_usd = 2.0
+            cfg.reserved_budget_usd = 3.5
+        await session.commit()
+
+    res = await client.get("/api/v1/reports/dashboard-metrics", headers=auth_headers)
+    assert res.status_code == 200
+    ai_budget = res.json()["ai_budget"]
+    assert ai_budget["monthly_budget_usd"] == 10.0
+    assert ai_budget["current_month_usage_usd"] == 2.0
+    assert ai_budget["reserved_budget_usd"] == 3.5
+    # 10.0 - 2.0 - 3.5 = 4.5
+    assert abs(ai_budget["remaining_budget_usd"] - 4.5) < 0.001
+
+
 def test_ui_contains_dashboard_and_report_controls():
     """Verifica que index.html contiene el contenedor de dashboard y modal de reporte."""
     with open("backend/app/static/index.html", "r", encoding="utf-8") as f:
