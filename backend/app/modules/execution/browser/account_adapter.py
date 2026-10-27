@@ -25,13 +25,16 @@ class AccountRegistrationAdapter:
     def verify_registration_authorization(
         self,
         portal_name: str,
-        creation_authorized: bool,
+        auth_record: Optional[Any] = None,
+        creation_authorized: Optional[bool] = None,
     ) -> Tuple[bool, str]:
         """
         Verifica mediante la política central si el usuario autorizó crear una cuenta en este portal.
+        Exige un registro persistido específico de autorización en lugar de un booleano en memoria.
         """
         allowed, reason = AuthorizationPolicy.can_create_account(
             portal_name=portal_name,
+            auth_record=auth_record,
             creation_authorized=creation_authorized,
         )
         return allowed, reason
@@ -40,15 +43,17 @@ class AccountRegistrationAdapter:
         self,
         page: Page,
         portal_name: str,
-        creation_authorized: bool,
-        user_profile: Dict[str, Any],
-        password: str,
+        auth_record: Optional[Any] = None,
+        creation_authorized: Optional[bool] = None,
+        user_profile: Optional[Dict[str, Any]] = None,
+        password: str = "",
     ) -> Dict[str, Any]:
         """
-        Rellena el formulario de registro sólo si la autorización previa fue otorgada.
+        Rellena el formulario de registro sólo si la autorización previa persistida fue otorgada.
         """
         allowed, reason = self.verify_registration_authorization(
             portal_name=portal_name,
+            auth_record=auth_record,
             creation_authorized=creation_authorized,
         )
         if not allowed:
@@ -56,9 +61,10 @@ class AccountRegistrationAdapter:
                 f"Bloqueo de seguridad: No se puede registrar cuenta en '{portal_name}'. Motivo: {reason}"
             )
 
+        prof = user_profile or {}
         # Mapa de selectores genéricos para formularios de registro
-        name = user_profile.get("full_name", "")
-        email = user_profile.get("email", "")
+        name = prof.get("full_name", "")
+        email = prof.get("email", "")
 
         filled_fields = []
 

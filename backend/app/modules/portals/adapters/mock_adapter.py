@@ -196,4 +196,5 @@ class MockPortalAdapter:
             status_code=201,
             evidence=evidence,
             error_message=None,
+            result_type="simulated_success",
         )

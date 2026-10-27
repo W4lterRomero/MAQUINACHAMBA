@@ -213,6 +213,12 @@ class AutoApprovalPipeline:
         results_summary = []
 
         for vac in candidate_vacancies:
+            # 5.0 Validación de oportunidad real lista para postular (P0 Item 8)
+            is_ready, unready_reason = VacancyIntegrityService.validate_vacancy_readiness_for_application(vac)
+            if not is_ready:
+                logger.info(f"[{tenant_id}] Vacante omitida de auto-preparación por no ser apta: '{vac.job_title}' ({unready_reason})")
+                continue
+
             # 5.1 Verificación de fraude y cierre
             integrity = VacancyIntegrityService.analyze_vacancy(
                 title=vac.job_title,

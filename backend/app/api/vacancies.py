@@ -175,7 +175,7 @@ async def create_or_import_vacancy(
         discovered_date=now_dt.date(),
         posted_date=now_dt.date(),
         is_active=integrity["is_active"],
-        verification_status="pending_verification",
+        verification_status="verified" if (is_safe and integrity["is_active"] and not integrity["is_fraud_suspect"] and payload.source != "sample") else "pending_verification",
         unknown_fields=[] if payload.salary_min else ["salary"],
         sources_detail=[{
             "source": payload.source,
@@ -186,7 +186,7 @@ async def create_or_import_vacancy(
         closure_reason=integrity["closure_reason"],
         dedup_hash=dedup_hash,
         fetched_at=now_dt,
-        is_real_search_result=False,
+        is_real_search_result=(is_safe and payload.source != "sample"),
     )
     session.add(vacancy)
     await session.commit()

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import logging
 from pathlib import Path
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 
@@ -77,7 +77,7 @@ class BrowserAgent:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.stop()
 
-    async def start(self, storage_state_path: Optional[Path] = None):
+    async def start(self, storage_state: Optional[Union[Path, str, Dict[str, Any]]] = None):
         """Inicia el motor Playwright y configura el contexto del navegador."""
         if self._playwright is not None:
             return
@@ -100,8 +100,11 @@ class BrowserAgent:
             "timezone_id": "America/El_Salvador",
         }
 
-        if storage_state_path and storage_state_path.exists():
-            context_kwargs["storage_state"] = str(storage_state_path)
+        if storage_state is not None:
+            if isinstance(storage_state, dict):
+                context_kwargs["storage_state"] = storage_state
+            elif isinstance(storage_state, (Path, str)) and Path(storage_state).exists():
+                context_kwargs["storage_state"] = str(storage_state)
 
         self._context = await self._browser.new_context(**context_kwargs)
         self.current_page = await self._context.new_page()
@@ -136,6 +139,7 @@ class BrowserAgent:
         await asyncio.sleep(random.uniform(0.3, 0.8))
         await self.current_page.goto(url, wait_until=wait_until, timeout=timeout_ms)
         await self.check_for_bot_challenge()
+        return self.current_page
 
     async def check_for_bot_challenge(self):
         """

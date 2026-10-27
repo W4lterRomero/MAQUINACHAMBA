@@ -121,15 +121,25 @@ async def prepare_candidacy(
             detail=f"Postulación bloqueada por seguridad: la vacante está cerrada o presenta indicios de fraude ({reason_str}). Para proceder bajo su propio criterio, active force_proceed=true.",
         )
 
+    # Validación estricta de vacante real y verificada (P0 Item 8)
+    is_ready, unready_reason = VacancyIntegrityService.validate_vacancy_readiness_for_application(vacancy)
+    if not is_ready and not payload.force_proceed:
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Postulación bloqueada: {unready_reason} Para pruebas de simulación, active force_proceed=true.",
+        )
+
     exception_consent = None
-    if (is_fraud_suspect or is_closed) and payload.force_proceed:
+    if (is_fraud_suspect or is_closed or not is_ready) and payload.force_proceed:
         exception_consent = {
             "action": "user_exception_consent",
             "forced_at": datetime.now(timezone.utc).isoformat(),
-            "reason": analysis["closure_reason"] or "Riesgo de fraude confirmado por usuario",
+            "reason": analysis["closure_reason"] or unready_reason or "Excepción autorizada por usuario",
             "state_version": vacancy.updated_at.isoformat() if vacancy.updated_at else datetime.now(timezone.utc).isoformat(),
             "fraud_signals": analysis["fraud_signals"],
             "is_closed": is_closed,
+            "unready_reason": unready_reason,
         }
 
     if payload.cv_id:

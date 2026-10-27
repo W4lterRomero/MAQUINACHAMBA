@@ -93,16 +93,29 @@ async def test_auth_adapter_session_isolation_and_permissions(tmp_path):
 
 @pytest.mark.asyncio
 async def test_account_registration_authorization_gate():
-    """REQ-025: Falla inmediatamente si no existe autorización explícita para el portal."""
+    """REQ-025 / Bloqueador 4: Falla si no existe autorización persistida específica para el portal."""
+    from backend.app.modules.portals.models import PortalAuthorization
+
     adapter = AccountRegistrationAdapter(tenant_id="tenant-test-acc-003")
 
-    # 1. Sin autorización explícita -> PermissionError
+    # 1. Sin autorización explícita -> No permitido
     allowed, reason = adapter.verify_registration_authorization("Indeed", creation_authorized=False)
     assert allowed is False
     assert "autorización" in reason.lower()
 
-    # 2. Con autorización explícita -> Permitido
+    # 2. Con flag booleano solo sin registro persistido -> RECHAZADO (Bloqueador 4)
     allowed, reason = adapter.verify_registration_authorization("Indeed", creation_authorized=True)
+    assert allowed is False
+    assert "no es evidencia suficiente" in reason or "booleano" in reason
+
+    # 3. Con registro persistido válido para 'register_account' -> Permitido
+    auth_rec = PortalAuthorization(
+        tenant_id="tenant-test-acc-003",
+        portal_name="indeed",
+        action="register_account",
+        authorized=True,
+    )
+    allowed, reason = adapter.verify_registration_authorization("Indeed", auth_record=auth_rec)
     assert allowed is True
 
 

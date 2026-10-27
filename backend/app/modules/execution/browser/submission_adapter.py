@@ -80,9 +80,12 @@ class SubmissionAdapter:
             return {
                 "success": True,
                 "is_simulation": True,
-                "confirmation_number": "SIMULATED_RECEIPT",
+                "confirmation_number": "SIMULATED_PREVIEW_ONLY",
+                "confirmation_code": "SIMULATED_PREVIEW_ONLY",
                 "evidence": receipt,
-                "result_type": "success",
+                "receipt": receipt,
+                "screenshot": screenshot_meta,
+                "result_type": "simulated_success",
             }
 
         # 2. MODO ENVÍO REAL SUPERVISADO

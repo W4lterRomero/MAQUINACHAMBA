@@ -96,6 +96,8 @@ function Invoke-Install {
     & $VenvPython -m pip install --quiet --upgrade pip
     & $VenvPython -m pip install --quiet -r (Join-Path $RepoRoot "backend\requirements.txt")
     & $VenvPython -m pip install --quiet "graphifyy==0.9.2"
+    Write-Host "[+] Instalando navegadores de Playwright (Chromium)..." -ForegroundColor Green
+    & $VenvPython -m playwright install chromium
 
     Ensure-EnvConfiguration
 

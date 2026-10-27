@@ -584,27 +584,50 @@ class DurableExecutionWorker:
         crm = crm_res.scalar_one_or_none()
 
         if exec_result == "success":
+            # P0: MockPortalAdapter o modo simulación NUNCA producen sent_confirmed
+            is_simulated = (
+                self.simulation_mode
+                or isinstance(portal_adapter, MockPortalAdapter)
+                or getattr(portal_adapter, "PORTAL_NAME", "") == "mock_test_portal"
+                or getattr(portal_adapter, "CAPABILITIES", {}).get("mode") == "simulation_only"
+                or getattr(sub_result, "result_type", "") == "simulated_success"
+                or (sub_result and getattr(sub_result, "evidence", {}) and sub_result.evidence.get("is_simulation") is True)
+                or (sub_result and getattr(sub_result, "evidence", {}) and sub_result.evidence.get("simulation_mode") is True)
+            )
+
+            if is_simulated:
+                success_status = "simulated_success"
+                event_type = "simulation_confirmed"
+                next_action = "Simulación completada con éxito. Revisar evidencia antes de activación real."
+                msg_text = f"Simulación de postulación completada exitosamente. Recibo: {conf_number}"
+            else:
+                success_status = "sent_confirmed"
+                event_type = "submission_confirmed"
+                next_action = "Esperar respuesta de la empresa o programar seguimiento."
+                msg_text = f"Postulación enviada exitosamente. Recibo: {conf_number}"
+
             if cand_obj:
-                cand_obj.status = "sent_confirmed"
+                cand_obj.status = success_status
             if crm:
                 old_st = crm.current_status
-                crm.current_status = "sent_confirmed"
-                crm.next_action = "Esperar respuesta de la empresa o programar seguimiento."
+                crm.current_status = success_status
+                crm.next_action = next_action
                 session.add(CRMEvent(
                     tenant_id=persisted_task.tenant_id,
                     crm_entry_id=crm.id,
-                    event_type="submission_confirmed",
+                    event_type=event_type,
                     old_status=old_st,
-                    new_status="sent_confirmed",
+                    new_status=success_status,
                     details={
                         "confirmation": conf_number,
-                        "portal": getattr(self.portal, "PORTAL_NAME", "mock_test_portal"),
+                        "portal": getattr(portal_adapter, "PORTAL_NAME", "mock_test_portal"),
                         "dispatch_attempt_id": dispatch_attempt_id,
+                        "is_simulated": is_simulated,
                     },
                 ))
             await session.commit()
             self.active_fence_tokens.pop(persisted_task.id, None)
-            return True, f"Postulación enviada exitosamente. Recibo: {conf_number}"
+            return True, msg_text
 
         elif exec_result == "uncertain":
             # P0/P1: Resultado incierto -> requiere intervención, PROHIBIDO reenvío ciego
@@ -712,10 +735,26 @@ class DurableExecutionWorker:
             # Caso 1: Log previo confirma éxito
             if last_log and last_log.result == "success":
                 target_status = "completed"
-                cand_target_status = "sent_confirmed"
-                crm_target_status = "sent_confirmed"
-                rec_action = "reconciled_completed"
-                rec_reason = "Efecto completado en portal antes de la caída; estado reconciliado sin reenvío."
+                # P0: MockPortalAdapter o simulación reconcilian a simulated_success
+                is_log_sim = (
+                    get_settings().simulation_mode
+                    or (last_log.evidence and (
+                        last_log.evidence.get("simulation_mode") is True
+                        or last_log.evidence.get("is_simulation") is True
+                        or last_log.evidence.get("portal") == "mock_test_portal"
+                        or last_log.evidence.get("is_simulated") is True
+                    ))
+                )
+                if is_log_sim:
+                    cand_target_status = "simulated_success"
+                    crm_target_status = "simulated_success"
+                    rec_action = "reconciled_simulated_completed"
+                    rec_reason = "Efecto simulado completado en portal de prueba antes de la caída; reconciliado a simulated_success sin reenvío."
+                else:
+                    cand_target_status = "sent_confirmed"
+                    crm_target_status = "sent_confirmed"
+                    rec_action = "reconciled_completed"
+                    rec_reason = "Efecto completado en portal antes de la caída; estado reconciliado sin reenvío."
 
             # Caso 2: Intento de despacho en vuelo, log in_progress/uncertain, o incertidumbre
             elif (

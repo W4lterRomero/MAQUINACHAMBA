@@ -16,6 +16,7 @@ from backend.app.modules.evaluation.models import Evaluation
 from backend.app.modules.evaluation.service import DeterministicEvaluationService
 from backend.app.modules.profile.models import Skill, UserProfile
 from backend.app.modules.vacancies.connectors.remotive import RemotiveJobConnector
+from backend.app.modules.vacancies.ingestion import canonicalize_url, compute_dedup_hash
 from backend.app.modules.vacancies.models import JobSearchPreferences, Vacancy
 from backend.app.modules.vacancies.service import VacancyIntegrityService
 
@@ -250,9 +251,9 @@ class JobSearchService:
                 closing_date=item.closing_date,
             )
 
-            # 4. Cálculo de dedup_hash determinista (REQ-008)
-            dedup_input = f"{item.source_url.strip().lower()}|{comp_lower}|{title_lower}"
-            dedup_hash = hashlib.sha256(dedup_input.encode("utf-8")).hexdigest()
+            # 4. Canonicalización de URL y cálculo de dedup_hash unificado (REQ-008)
+            canonical_url = canonicalize_url(item.source_url)
+            dedup_hash = compute_dedup_hash(canonical_url, item.company_name, item.job_title)
 
             # 5. Comprobar existencia previa
             existing_res = await session.execute(
@@ -266,14 +267,22 @@ class JobSearchService:
             if existing:
                 existing.last_verified_at = now
                 existing.fetched_at = item.fetched_at
+                existing.source_url = canonical_url
                 jobs_duplicate += 1
                 vac_target = existing
             else:
+                if item.is_real_search_result and integrity["is_active"] and not integrity["is_fraud_suspect"]:
+                    init_ver_status = "verified"
+                elif not item.is_real_search_result:
+                    init_ver_status = "sample_unverified"
+                else:
+                    init_ver_status = "pending_verification"
+
                 vac_target = Vacancy(
                     tenant_id=tenant_id,
                     external_id=item.external_id,
                     source=item.source,
-                    source_url=item.source_url,
+                    source_url=canonical_url,
                     company_name=item.company_name,
                     job_title=item.job_title,
                     location=item.location,
@@ -286,6 +295,7 @@ class JobSearchService:
                     posted_date=item.posted_date,
                     closing_date=item.closing_date,
                     is_active=integrity["is_active"],
+                    verification_status=init_ver_status,
                     fraud_signals=integrity["fraud_signals"],
                     closure_reason=integrity["closure_reason"],
                     dedup_hash=dedup_hash,

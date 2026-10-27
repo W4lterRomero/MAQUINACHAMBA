@@ -413,6 +413,7 @@ async def test_e2e_pipeline_and_approval_inbox(
         assert success is True
         assert "MOCK-CONF-" in msg
 
-        # Verificar que el estado del log fue exitoso y el portal fue el simulador
+        # Verificar que el estado del log fue exitoso y el portal fue el simulador con simulated_success (P0 Item 2)
         cand_after = (await session.execute(select(Candidacy).where(Candidacy.id == candidacy_id))).scalar_one()
-        assert cand_after.status in ("sent_confirmed", "simulated")
+        assert cand_after.status == "simulated_success"
+        assert cand_after.status != "sent_confirmed"

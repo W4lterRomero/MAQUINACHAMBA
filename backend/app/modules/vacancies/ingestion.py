@@ -73,10 +73,14 @@ def canonicalize_url(raw_url: str) -> str:
 def compute_dedup_hash(canonical_url: str, company: str, title: str) -> str:
     """
     Calcula un hash determinista de deduplicación.
-    Combina la URL canónica (o en su defecto empresa + título normalizados).
+    Combina la URL canónica (o en su defecto empresa + título normalizados con colapso de puntuación y espacios).
     """
-    norm_company = re.sub(r"[^\w\s]", "", company.lower()).strip()
-    norm_title = re.sub(r"[^\w\s]", "", title.lower()).strip()
+    clean_company = re.sub(r"[^\w\s]", " ", (company or "").lower())
+    norm_company = re.sub(r"\s+", " ", clean_company).strip()
+
+    clean_title = re.sub(r"[^\w\s]", " ", (title or "").lower())
+    norm_title = re.sub(r"\s+", " ", clean_title).strip()
+
     input_str = f"{canonical_url}|{norm_company}|{norm_title}"
     return hashlib.sha256(input_str.encode("utf-8")).hexdigest()
 
@@ -494,11 +498,8 @@ class JobIngestionService:
             canonical_url = canonicalize_url(raw_url)
 
             # Validar URL con defensas anti-SSRF de la aplicación
-            is_safe_url, _ = validate_url(canonical_url)
-            verification_status = "pending_verification"
+            is_safe_url, _ = validate_url(canonical_url, allow_localhost=True)
             if not is_safe_url or not canonical_url:
-                # Si no tiene URL válida externa, marcar para verificación en lugar de descartar
-                verification_status = "pending_verification"
                 if not canonical_url:
                     canonical_url = f"https://example.com/unverified-search-job/{hashlib.sha256(f'{company}|{title}'.encode()).hexdigest()[:12]}"
 
@@ -557,6 +558,9 @@ class JobIngestionService:
                 salary_max=sal_max,
                 salary_currency=sal_curr,
             )
+
+            is_real = is_safe_url and bool(raw_url) and ("unverified-search-job" not in canonical_url) and provider_norm != "sample"
+            verification_status = "verified" if (is_real and not integrity["is_closed"] and not integrity["is_fraud_suspect"]) else "pending_verification"
 
             # Hash de deduplicación
             dedup_hash = compute_dedup_hash(canonical_url, company, title)
@@ -633,6 +637,7 @@ class JobIngestionService:
                     closure_reason=integrity["closure_reason"],
                     dedup_hash=dedup_hash,
                     last_verified_at=now_dt,
+                    is_real_search_result=is_real,
                 )
                 session.add(vac)
                 imported_vacancies.append(vac)

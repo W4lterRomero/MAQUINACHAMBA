@@ -222,10 +222,10 @@ class TestPhase1MVPVertical:
         assert success is True
         assert "Recibo: MOCK-CONF-" in message
 
-        # 9. Verificación de confirmación y evidencia durable
+        # 9. Verificación de confirmación y evidencia durable (simulated_success en modo simulación)
         assert scheduled_task.status == "completed"
-        assert candidacy.status == "sent_confirmed"
-        assert crm_entry.current_status == "sent_confirmed"
+        assert candidacy.status == "simulated_success"
+        assert crm_entry.current_status == "simulated_success"
 
         # Verificar ExecutionLog
         log_res = await db_session.execute(select(ExecutionLog).where(ExecutionLog.task_id == scheduled_task.id))
@@ -241,8 +241,9 @@ class TestPhase1MVPVertical:
             select(CRMEvent).where(CRMEvent.crm_entry_id == crm_entry.id).order_by(CRMEvent.created_at)
         )
         events = events_res.scalars().all()
-        assert len(events) >= 3  # prepared -> approved_and_scheduled -> submission_confirmed
-        assert events[-1].event_type == "submission_confirmed"
+        assert len(events) >= 3  # prepared -> approved_and_scheduled -> simulation_confirmed
+        assert events[-1].event_type == "simulation_confirmed"
+        assert events[-1].new_status == "simulated_success"
 
     @pytest.mark.asyncio
     async def test_modification_invalidates_approval(

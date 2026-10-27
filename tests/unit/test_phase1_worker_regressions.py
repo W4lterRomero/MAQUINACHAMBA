@@ -747,7 +747,7 @@ class TestDurabilityConcurrencyAndCrashRecovery:
                 clock=clock,
             )
             assert len(recovered) == 1
-            assert recovered[0]["action"] == "reconciled_completed"
+            assert recovered[0]["action"] in ("reconciled_completed", "reconciled_simulated_completed")
 
             fresh_task = await session.get(ScheduledTask, task.id)
             assert fresh_task.status == "completed"

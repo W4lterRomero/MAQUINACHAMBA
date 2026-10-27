@@ -93,19 +93,108 @@ class TestAuthorizationPolicy:
         )
         assert allowed is False
 
-    def test_account_creation_requires_authorization(self):
-        """REQ-025: Autorización específica para crear cuentas."""
-        allowed, reason = AuthorizationPolicy.can_create_account(
-            portal_name="Indeed",
-            creation_authorized=False,
-        )
-        assert allowed is False
+    def test_account_creation_requires_persisted_authorization(self):
+        """REQ-025 / Bloqueador 4: Autorización específica persistida para crear cuentas."""
+        from datetime import datetime, timezone, timedelta
+        from backend.app.modules.portals.models import PortalAuthorization
 
+        # 1. Flag booleano suministrado por el llamador NO es evidencia suficiente (Bloqueador 4)
         allowed, reason = AuthorizationPolicy.can_create_account(
             portal_name="Indeed",
             creation_authorized=True,
         )
+        assert allowed is False
+        assert "no es evidencia suficiente" in reason or "booleano" in reason
+
+        # 2. Sin autorización persistida
+        allowed, reason = AuthorizationPolicy.can_create_account(
+            portal_name="Indeed",
+            auth_record=None,
+        )
+        assert allowed is False
+
+        # 3. Con registro persistido válido para 'register_account'
+        valid_rec = PortalAuthorization(
+            tenant_id="tenant-1",
+            portal_name="indeed",
+            action="register_account",
+            authorized=True,
+            authorized_by="user",
+        )
+        allowed, reason = AuthorizationPolicy.can_create_account(
+            portal_name="Indeed",
+            auth_record=valid_rec,
+        )
         assert allowed is True
+
+        # 4. Separación estricta de permisos (Bloqueador 6):
+        # Permiso para 'search_jobs' o 'read_email' NO permite 'register_account' ni 'submit_application'
+        search_rec = PortalAuthorization(
+            tenant_id="tenant-1",
+            portal_name="indeed",
+            action="search_jobs",
+            authorized=True,
+            authorized_by="user",
+        )
+        allowed, reason = AuthorizationPolicy.can_create_account(
+            portal_name="Indeed",
+            auth_record=search_rec,
+        )
+        assert allowed is False
+        assert "Permiso insuficiente" in reason
+
+        allowed, reason = AuthorizationPolicy.validate_portal_action_authorization(
+            auth_record=search_rec,
+            portal_name="indeed",
+            requested_action="submit_application",
+        )
+        assert allowed is False
+        assert "Permiso insuficiente" in reason
+
+        # 5. Revocada o expirada es rechazada
+        revoked_rec = PortalAuthorization(
+            tenant_id="tenant-1",
+            portal_name="indeed",
+            action="register_account",
+            authorized=True,
+            revoked_at=datetime.now(timezone.utc),
+        )
+        allowed, reason = AuthorizationPolicy.can_create_account(
+            portal_name="Indeed",
+            auth_record=revoked_rec,
+        )
+        assert allowed is False
+        assert "revocada" in reason.lower()
+
+        expired_rec = PortalAuthorization(
+            tenant_id="tenant-1",
+            portal_name="indeed",
+            action="register_account",
+            authorized=True,
+            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+        allowed, reason = AuthorizationPolicy.can_create_account(
+            portal_name="Indeed",
+            auth_record=expired_rec,
+        )
+        assert allowed is False
+        assert "expirado" in reason.lower()
+
+        # 6. Modo simulación bloquea envíos reales (Bloqueador 6)
+        submit_rec = PortalAuthorization(
+            tenant_id="tenant-1",
+            portal_name="indeed",
+            action="submit_application",
+            authorized=True,
+        )
+        allowed, reason = AuthorizationPolicy.validate_portal_action_authorization(
+            auth_record=submit_rec,
+            portal_name="indeed",
+            requested_action="submit_application",
+            simulation_mode=True,
+        )
+        assert allowed is False
+        assert "simulación" in reason.lower()
 
     def test_follow_up_requires_approval(self):
         """REQ-027: Seguimiento con aprobación."""
