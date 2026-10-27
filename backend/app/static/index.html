@@ -230,6 +230,13 @@
       letter-spacing: .08em;
       line-height: 1.6;
     }
+    .nav-section-label {
+      padding: .85rem .85rem .35rem;
+      color: #85a0ae;
+      font-size: .59rem;
+      font-weight: 800;
+      letter-spacing: .12em;
+    }
     nav button {
       width: 100%;
       min-height: 43px;
@@ -305,6 +312,42 @@
       line-height: 1.12;
     }
     .page-intro p:last-child { margin: .55rem 0 0; max-width: 660px; color: #71838d; font-size: .91rem; line-height: 1.6; }
+    .setup-guide {
+      margin: 0 0 1.5rem;
+      padding: 1.35rem;
+      border: 1px solid #d8e8e7;
+      border-radius: 15px;
+      background: linear-gradient(120deg, #fff 0%, #f1f8f7 100%);
+      box-shadow: 0 5px 18px rgba(24, 47, 61, .035);
+    }
+    .setup-guide-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; }
+    .setup-guide-heading h2 { margin: 0; color: #183748; font-size: 1.12rem; letter-spacing: -.02em; }
+    .setup-guide-heading p:last-child { margin: .35rem 0 0; color: #71838d; font-size: .82rem; line-height: 1.5; }
+    .setup-guide-status { display: inline-flex; align-items: center; gap: .42rem; padding: .42rem .65rem; border: 1px solid #d4e7e0; border-radius: 999px; background: #f3faf6; color: #34745d; white-space: nowrap; font-size: .68rem; font-weight: 700; }
+    .setup-guide-status span { color: #32a277; font-size: .65rem; }
+    .setup-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+    .setup-step {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      min-width: 0;
+      padding: .8rem .9rem;
+      border: 1px solid #e2ebec;
+      border-radius: 10px;
+      background: rgba(255,255,255,.82);
+      color: #244251;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+    }
+    .setup-step:hover { border-color: #8ebfba; box-shadow: 0 5px 14px rgba(29, 91, 87, .08); transform: translateY(-1px); }
+    .setup-step-number { display: grid; flex: 0 0 2rem; width: 2rem; height: 2rem; place-items: center; border-radius: 8px; background: #e8f4f2; color: #087e78; font-size: .72rem; font-weight: 800; }
+    .setup-step-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: .2rem; }
+    .setup-step-copy strong { font-size: .79rem; font-weight: 720; }
+    .setup-step-copy small { color: #778994; font-size: .7rem; line-height: 1.4; }
+    .setup-step-arrow { color: #408b83; font-size: 1rem; }
+    .inline-empty { display: block; padding: .65rem .75rem; border-radius: 8px; background: #f6f9fa; color: #7a8a93; font-size: .78rem; line-height: 1.5; }
+    .profile-cv-item { padding: .7rem .8rem; border-radius: 9px; margin-bottom: .45rem; border: 1px solid #e2e8ed; background: #f7fafb; color: #264251; font-size: .8rem; }
     .grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1.15rem; align-items: start; }
     .card {
       min-width: 0;
@@ -359,6 +402,19 @@
     .upload-zone:hover, .upload-zone.dragover { background: #f0f8f7; border-color: #51a29c; }
     .quote-box { background: #f2f8f8; color: #256b68; }
     .master-cv-card.active-cv { border-color: #d3a64d; box-shadow: 0 0 0 1px #d3a64d; }
+    .nav-section-label { color: #90a9b4; }
+    .kanban-empty { padding: .8rem .65rem; color: #7d8d96; font-size: .72rem; line-height: 1.5; border: 1px dashed #d7e1e5; border-radius: 8px; background: rgba(255,255,255,.6); }
+    .table-empty { padding: 1.5rem 1rem; text-align: center; color: #758791; white-space: normal; line-height: 1.5; }
+    .empty-state { max-width: 680px; margin: 1rem auto; padding: 2rem 1.5rem; text-align: center; background: #f7fafb; border: 1px dashed #cbdadd; border-radius: 14px; }
+    .empty-state-icon { width: 44px; height: 44px; display: grid; place-items: center; margin: 0 auto .8rem; border-radius: 13px; background: #e7f4f2; color: #087e78; font-size: 1.2rem; font-weight: 800; }
+    .empty-state h3 { margin: 0 0 .45rem; color: #244251; font-size: 1rem; }
+    .empty-state p { max-width: 520px; margin: 0 auto 1rem; color: #71838d; font-size: .83rem; line-height: 1.6; }
+    .empty-state-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: .55rem; }
+    .dashboard-status { display: none; align-items: center; justify-content: space-between; gap: .8rem; margin: -.65rem 0 1rem; padding: .7rem .9rem; border: 1px solid #ead9b5; border-radius: 9px; background: #fffaf0; color: #795b22; font-size: .8rem; line-height: 1.5; }
+    [style*="#0f172a"], [style*="#131c2e"], [style*="#0b1120"], [style*="#070d19"] {
+      background-color: #f6f9fa !important;
+      border-color: #e2e8ed !important;
+    }
     .brand::before {
       content: "M";
       width: 34px;
@@ -403,6 +459,7 @@
         background: #15384a;
       }
       nav::before, nav::after { display: none; }
+      .nav-section-label { display: none; }
       nav::-webkit-scrollbar { display: none; }
       nav button { width: auto; min-height: 38px; padding: .48rem .72rem; font-size: .76rem; color: #c1d0d7; }
       nav button::before { width: 1.15rem; height: 1.15rem; flex-basis: 1.15rem; font-size: .78rem; }
@@ -413,6 +470,19 @@
       .page-intro h1 { font-size: 1.55rem; }
       .page-intro p:last-child { font-size: .84rem; }
       .grid { grid-template-columns: minmax(0, 1fr); gap: .85rem; }
+      .grid[style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; }
+      .setup-guide { padding: 1rem; margin-bottom: 1rem; }
+      .setup-guide-heading { flex-direction: column; gap: .65rem; }
+      .setup-steps { grid-template-columns: minmax(0, 1fr); }
+      #tab-dashboard > div[style*="grid-template-columns: repeat(auto-fit"] { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)) !important; }
+      #tab-dashboard > div[style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: minmax(0, 1fr) !important; }
+      .skill-attributes { flex-wrap: wrap; }
+      .skill-attributes select { min-width: 130px; }
+      .skill-attributes .compact-field { flex: 1; min-width: 100px; }
+      .skill-attributes .btn { flex: 1; }
+      .empty-state { padding: 1.5rem 1rem; }
+      .empty-state-actions { flex-direction: column; }
+      .empty-state-actions .btn { width: 100%; }
       .card { padding: 1.1rem; border-radius: 12px; }
       .kanban-board { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
       table { display: block; overflow-x: auto; white-space: nowrap; }
@@ -439,23 +509,26 @@
     </div>
   </header>
 
-  <nav>
-    <button data-tab="tab-dashboard" id="nav-tab-dashboard" onclick="switchTab('tab-dashboard')">Dashboard</button>
-    <button data-tab="tab-profile" id="nav-tab-profile" class="active" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
+  <nav aria-label="Navegación principal">
+    <button data-tab="tab-dashboard" id="nav-tab-dashboard" class="active" aria-current="page" onclick="switchTab('tab-dashboard')">Dashboard</button>
+    <div class="nav-section-label">PREPARA TU PERFIL</div>
+    <button data-tab="tab-profile" id="nav-tab-profile" onclick="switchTab('tab-profile')">Perfil y Habilidades</button>
     <button data-tab="tab-cv-import" id="nav-tab-cv-import" onclick="switchTab('tab-cv-import')">Importar y Revisar CV</button>
     <button data-tab="tab-master-cvs" id="nav-tab-master-cvs" onclick="switchTab('tab-master-cvs')">CVs Maestros</button>
     <button data-tab="tab-communication" id="nav-tab-communication" onclick="switchTab('tab-communication')">Estilo y Comunicación</button>
+    <div class="nav-section-label">ENCUENTRA Y ORGANIZA</div>
     <button data-tab="tab-vacancies" id="nav-tab-vacancies" onclick="switchTab('tab-vacancies')">Vacantes e Importación</button>
     <button data-tab="tab-approvals" id="nav-tab-approvals" onclick="switchTab('tab-approvals')">Revisión y Aprobaciones</button>
     <button data-tab="tab-crm" id="nav-tab-crm" onclick="switchTab('tab-crm')">CRM de Candidaturas</button>
     <button data-tab="tab-execution" id="nav-tab-execution" onclick="switchTab('tab-execution')">Cola de Ejecución</button>
+    <div class="nav-section-label">PREFERENCIAS</div>
     <button data-tab="tab-ai-config" id="nav-tab-ai-config" onclick="switchTab('tab-ai-config')">Configuración IA (BYOK)</button>
     <button data-tab="tab-backups" id="nav-tab-backups" onclick="switchTab('tab-backups')">Respaldos y Backups</button>
   </nav>
 
   <main>
     <!-- TAB 1: PERFIL -->
-    <section id="tab-profile" class="tab-content active">
+    <section id="tab-profile" class="tab-content">
       <div class="grid">
         <div class="card">
           <h2>Configuración de Perfil Profesional</h2>
@@ -470,16 +543,16 @@
             </div>
             <div class="form-group">
               <label>Teléfono</label>
-              <input type="text" id="profPhone" placeholder="+52 55 1234 5678">
+              <input type="text" id="profPhone" placeholder="Ej. +503 0000 0000">
             </div>
             <div style="display: flex; gap: 1rem;">
               <div class="form-group" style="flex: 1;">
                 <label>Ciudad</label>
-                <input type="text" id="profCity" required placeholder="Ciudad de México">
+                <input type="text" id="profCity" required placeholder="Ej. San Salvador">
               </div>
               <div class="form-group" style="flex: 1;">
                 <label>País</label>
-                <input type="text" id="profCountry" required placeholder="México">
+                <input type="text" id="profCountry" required placeholder="Ej. El Salvador">
               </div>
             </div>
             <div class="form-group">
@@ -492,7 +565,7 @@
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
               <button type="submit" class="btn btn-primary">Guardar Perfil</button>
-              <span id="lblProfileVerificationStatus" class="badge badge-pending">No verificado</span>
+              <span id="lblProfileVerificationStatus" class="badge badge-pending" aria-live="polite">Completa tu perfil</span>
             </div>
           </form>
         </div>
@@ -508,18 +581,21 @@
                 <option value="tool">Herramienta</option>
               </select>
             </div>
-            <div style="display: flex; gap: 0.5rem;">
+            <div class="skill-attributes" style="display: flex; gap: 0.5rem; align-items: end;">
               <select id="skillLevel" style="flex: 1;">
                 <option value="intermediate">Intermedio</option>
                 <option value="advanced">Avanzado</option>
                 <option value="expert">Experto</option>
               </select>
-              <input type="number" id="skillYears" placeholder="Años" step="0.5" style="width: 80px;" value="3.0">
+              <div class="form-group compact-field" style="width: 110px; margin-bottom: 0;">
+                <label for="skillYears">Años (opcional)</label>
+                <input type="number" id="skillYears" placeholder="Sin dato" step="0.5" min="0" max="60" style="width: 100%;">
+              </div>
               <button type="submit" class="btn btn-outline">Agregar</button>
             </div>
           </form>
           <div id="skillsList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-            <span style="color: var(--text-muted); font-size: 0.85rem;">No hay habilidades registradas.</span>
+            <span class="inline-empty">Aún no añades habilidades. Agrega las que puedas respaldar con tu experiencia.</span>
           </div>
 
           <h2 style="margin-top: 2rem;">CVs Maestros Especializados</h2>
@@ -535,7 +611,7 @@
               <button type="button" class="btn btn-outline btn-sm" onclick="switchTab('tab-master-cvs')">Gestión Avanzada →</button>
             </div>
           </form>
-          <div id="cvsList"></div>
+          <div id="cvsList" class="inline-empty">Cuando tengas un perfil, podrás crear versiones de CV para distintos puestos.</div>
         </div>
       </div>
     </section>
@@ -645,7 +721,7 @@
             <span id="badgePendingSkillsCount" class="badge badge-pending">0</span>
           </h3>
           <div id="pendingSkillsContainer" style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
-            <div style="color: var(--text-muted); font-size: 0.85rem;">No hay habilidades pendientes de revisión.</div>
+            <div class="inline-empty">Cuando importes un CV, las habilidades encontradas aparecerán aquí para que las confirmes.</div>
           </div>
 
           <!-- Experiencias Pendientes -->
@@ -654,7 +730,7 @@
             <span id="badgePendingExpCount" class="badge badge-pending">0</span>
           </h3>
           <div id="pendingExperiencesContainer" style="display: flex; flex-direction: column; gap: 0.75rem;">
-            <div style="color: var(--text-muted); font-size: 0.85rem;">No hay experiencias pendientes de revisión.</div>
+            <div class="inline-empty">Las experiencias extraídas aparecerán aquí antes de añadirse a tu perfil.</div>
           </div>
         </div>
       </div>
@@ -664,7 +740,7 @@
     <section id="tab-master-cvs" class="tab-content">
       <div class="grid">
         <div class="card" style="max-width: 450px;">
-          <h2 id="formMasterCVTitle">Crear CV Maestro Especializado</h2>
+          <h2 id="formMasterCVTitle">Crear un CV especializado</h2>
           <form id="frmMasterCVForm" onsubmit="saveMasterCVForm(event)">
             <input type="hidden" id="editMasterCvId" value="">
             <div class="form-group">
@@ -702,14 +778,14 @@
 
         <div class="card" style="flex: 2;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem;">
-            <h2>CVs Maestros Disponibles</h2>
+            <h2>Tus CVs especializados</h2>
             <button class="btn btn-outline btn-sm" onclick="loadMasterCVsList()">Actualizar</button>
           </div>
           <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
-            Gestiona diferentes versiones de tu CV según el rol al que postules (Backend, Fullstack, DevOps, QA). El CV activo es el que se utilizará por defecto para evaluar vacantes.
+            Crea una versión enfocada para cada tipo de puesto. El CV activo se usará al comparar vacantes con tu perfil.
           </p>
           <div id="masterCVsCardsContainer" style="display: flex; flex-direction: column; gap: 1rem;">
-            <div style="text-align: center; color: var(--text-muted); padding: 2rem;">No hay CVs maestros registrados.</div>
+            <div class="empty-state"><div class="empty-state-icon" aria-hidden="true">▤</div><h3>Aún no tienes CVs especializados</h3><p>Crea una versión para cada tipo de puesto basada en tu perfil y tus habilidades verificadas.</p></div>
           </div>
         </div>
       </div>
@@ -914,9 +990,9 @@
       </div>
 
       <!-- INGESTIÓN MULTIFUENTE: CHATGPT & GEMINI (TAREA 2) -->
-      <details class="card" style="margin-bottom: 1.5rem;" open>
-        <summary style="cursor: pointer; font-size: 1.05rem; font-weight: 700; color: #93c5fd; margin-bottom: 0.5rem;">
-          📥 Ingestión Multifuente: ChatGPT, Gemini y Archivos
+      <details class="card import-details" id="vacancyImportDetails" style="margin-bottom: 1.5rem;">
+        <summary style="cursor: pointer; font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: 0.5rem;">
+          Agregar vacantes desde ChatGPT, Gemini o un archivo
         </summary>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
           Pega los reportes diarios generados por ChatGPT o Gemini (en Markdown, texto, listas o tablas) o carga un archivo (.txt, .md, .json, .csv). El sistema normalizará los campos y deduplicará automáticamente por URL limpia.
@@ -984,7 +1060,7 @@ Ejemplo:
             </div>
             <div class="form-group">
               <label>Ubicaciones Preferidas</label>
-              <input type="text" id="prefLocations" placeholder="Remoto, Worldwide, LATAM, Mexico">
+                <input type="text" id="prefLocations" placeholder="Remoto, LATAM, El Salvador">
             </div>
             <div class="form-group">
               <label>Modalidad de Trabajo</label>
@@ -1154,9 +1230,9 @@ Ejemplo:
       <div class="card" style="margin-bottom: 1.5rem;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--card-border); padding-bottom: 1rem; margin-bottom: 1rem;">
           <div>
-            <h2 style="border: none; padding: 0; margin-bottom: 0.35rem;">🌙 Bandeja de Aprobación Nocturna (Aprobar hoy, ejecutar mañana)</h2>
+            <h2 style="border: none; padding: 0; margin-bottom: 0.35rem;">Revisa tus candidaturas</h2>
             <p style="color: var(--text-muted); font-size: 0.875rem;">
-              Revisa las candidaturas preparadas automáticamente durante el día. Cada postulación aprobada programa su envío simulado para mañana en horario hábil (<strong style="color: #60a5fa;">America/El_Salvador</strong>). Toda edición invalida la aprobación previa.
+              Revisa los datos antes de aprobar. Las candidaturas aprobadas se programan para el horario hábil de tu zona. Puedes editar o posponer una candidatura antes de que se ejecute.
             </p>
           </div>
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
@@ -1168,7 +1244,7 @@ Ejemplo:
                 <option value="0.75">75% (Exigente)</option>
               </select>
             </div>
-            <button class="btn btn-primary btn-sm" onclick="runAutoPipelineFromUI()">⚡ Preparar Automáticamente</button>
+            <button class="btn btn-primary btn-sm" onclick="runAutoPipelineFromUI()">Preparar borradores</button>
             <button class="btn btn-outline btn-sm" onclick="loadApprovalInbox()">🔄 Refrescar</button>
           </div>
         </div>
@@ -1243,10 +1319,10 @@ Ejemplo:
     <!-- TAB 5: EJECUCIÓN -->
     <section id="tab-execution" class="tab-content">
       <div class="card">
-        <h2>Cola de Tareas Programadas Durables (Operación sin IDE)</h2>
+        <h2>Actividad programada</h2>
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
           <p style="font-size: 0.875rem; color: var(--text-muted);">
-            Las tareas persisten en SQLite y se procesan automáticamente por el launcher en segundo plano (<code>scripts/run_execution_daemon.py</code>).
+            Aquí verás las candidaturas que aprobaste y cuándo está prevista cada acción.
           </p>
           <button class="btn btn-outline btn-sm" onclick="triggerProcessCycle()">Ejecutar Ciclo Manual</button>
         </div>
@@ -1455,32 +1531,69 @@ Ejemplo:
     </section>
 
     <!-- TAB 10: DASHBOARD & REPORTES (REQ-028, D8) -->
-    <section id="tab-dashboard" class="tab-content">
+    <section id="tab-dashboard" class="tab-content active">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
         <div>
-          <h1 style="margin: 0;">Dashboard & Métricas de Búsqueda Laboral</h1>
+          <h1 style="margin: 0;">Tu búsqueda laboral, en orden</h1>
           <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">
-            Indicadores consolidados, control de postulaciones programadas y generación de reportes por correo (REQ-028).
+            Encuentra oportunidades, prepara candidaturas y sigue cada paso con tu aprobación.
           </p>
         </div>
         <div style="display: flex; gap: 0.5rem;">
           <button class="btn btn-primary btn-sm" onclick="openDailyReportModal()">📧 Generar Reporte Diario</button>
-          <button class="btn btn-outline btn-sm" onclick="loadDashboardMetrics()">🔄 Actualizar KPIs</button>
+          <button class="btn btn-outline btn-sm" onclick="loadDashboardMetrics()">Actualizar indicadores</button>
         </div>
       </div>
+      <div id="dashboardLoadStatus" class="dashboard-status" role="status" aria-live="polite">
+        <span>No se pudieron actualizar los indicadores. Inténtalo de nuevo.</span>
+        <button class="btn btn-outline btn-sm" type="button" onclick="loadDashboardMetrics()">Reintentar</button>
+      </div>
+
+      <section class="setup-guide" aria-labelledby="setupGuideTitle">
+        <div class="setup-guide-heading">
+          <div>
+            <p class="page-intro-kicker">RUTA RECOMENDADA</p>
+            <h2 id="setupGuideTitle">Empieza por aquí</h2>
+            <p>Completa estos pasos a tu ritmo. Tú revisas y decides antes de cualquier acción externa.</p>
+          </div>
+          <span class="setup-guide-status"><span aria-hidden="true">●</span> Modo simulación activo</span>
+        </div>
+        <div class="setup-steps">
+          <button class="setup-step" type="button" onclick="switchTab('tab-profile')">
+            <span class="setup-step-number">01</span>
+            <span class="setup-step-copy"><strong>Completa tu perfil</strong><small>Agrega experiencia y habilidades verificables.</small></span>
+            <span class="setup-step-arrow" aria-hidden="true">→</span>
+          </button>
+          <button class="setup-step" type="button" onclick="switchTab('tab-cv-import')">
+            <span class="setup-step-number">02</span>
+            <span class="setup-step-copy"><strong>Importa tu CV</strong><small>Revisa los datos extraídos antes de guardarlos.</small></span>
+            <span class="setup-step-arrow" aria-hidden="true">→</span>
+          </button>
+          <button class="setup-step" type="button" onclick="switchTab('tab-vacancies')">
+            <span class="setup-step-number">03</span>
+            <span class="setup-step-copy"><strong>Explora vacantes</strong><small>Define tus preferencias y reúne oportunidades.</small></span>
+            <span class="setup-step-arrow" aria-hidden="true">→</span>
+          </button>
+          <button class="setup-step" type="button" onclick="switchTab('tab-approvals')">
+            <span class="setup-step-number">04</span>
+            <span class="setup-step-copy"><strong>Revisa y aprueba</strong><small>Nada se envía sin tu aprobación.</small></span>
+            <span class="setup-step-arrow" aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
 
       <!-- Métricas Grid -->
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
         <div class="card" style="margin-bottom: 0;">
-          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Ventana de Despacho (Mañana)</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Programadas para mañana</div>
           <div style="font-size: 2rem; font-weight: 700; color: #10b981; margin-top: 0.5rem;" id="dashKpiScheduled">0</div>
-          <small style="color: var(--text-muted);">Postulaciones programadas</small>
+          <small style="color: var(--text-muted);">Candidaturas aprobadas</small>
         </div>
 
         <div class="card" style="margin-bottom: 0;">
-          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Pendientes de Aprobación</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Esperan tu revisión</div>
           <div style="font-size: 2rem; font-weight: 700; color: #f59e0b; margin-top: 0.5rem;" id="dashKpiPendingApproval">0</div>
-          <small style="color: var(--text-muted);">Requieren tu revisión hoy</small>
+          <small style="color: var(--text-muted);">Nada se envía sin tu aprobación</small>
         </div>
 
         <div class="card" style="margin-bottom: 0;">
@@ -1912,8 +2025,11 @@ Ejemplo:
     let cachedPendingSkills = [];
     let cachedPendingExperiences = [];
     let detectedContactCache = null;
+    let toastTimeout = null;
 
     async function apiRequest(url, options = {}) {
+      const suppressToast = options.suppressToast === true;
+      if (suppressToast) delete options.suppressToast;
       const headers = options.headers || {};
       if (authToken) {
         headers["Authorization"] = `Bearer ${authToken}`;
@@ -1932,11 +2048,13 @@ Ejemplo:
         }
         if (!res.ok) {
           const errData = await res.json().catch(() => ({ detail: res.statusText }));
-          throw new Error(errData.detail || `Error ${res.status}`);
+          const error = new Error(errData.detail || `Error ${res.status}`);
+          error.status = res.status;
+          throw error;
         }
         return await res.json();
       } catch (err) {
-        showToast(err.message, true);
+        if (!suppressToast) showToast(err.message, true);
         throw err;
       }
     }
@@ -1953,16 +2071,21 @@ Ejemplo:
         t.classList.remove("toast-error");
       }
       t.style.display = "block";
-      setTimeout(() => { t.style.display = "none"; }, 4000);
+      if (toastTimeout) clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => { t.style.display = "none"; }, 4000);
     }
 
-    function switchTab(tabId) {
-      document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+    function switchTab(tabId, loadData = true) {
+      document.querySelectorAll("nav button").forEach(b => {
+        b.classList.remove("active");
+        b.removeAttribute("aria-current");
+      });
       document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
 
       const targetNavBtn = document.querySelector(`nav button[data-tab="${tabId}"]`) || document.getElementById(`nav-${tabId}`);
       if (targetNavBtn) {
         targetNavBtn.classList.add("active");
+        targetNavBtn.setAttribute("aria-current", "page");
         if (window.matchMedia("(max-width: 760px)").matches) {
           targetNavBtn.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
         }
@@ -1971,6 +2094,7 @@ Ejemplo:
       const targetTab = document.getElementById(tabId);
       if (targetTab) {
         targetTab.classList.add("active");
+        window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
       if (window.history && window.history.replaceState) {
@@ -1979,17 +2103,19 @@ Ejemplo:
         window.history.replaceState({}, "", url);
       }
 
-      if (tabId === "tab-dashboard") loadDashboardMetrics();
-      if (tabId === "tab-crm") loadCRM();
-      if (tabId === "tab-vacancies") { loadVacancies(); loadImportBatches(); loadSearchPreferences(); }
-      if (tabId === "tab-approvals") loadApprovalInbox();
-      if (tabId === "tab-execution") loadTasks();
-      if (tabId === "tab-cv-import") loadCVImportData();
-      if (tabId === "tab-master-cvs") { loadMasterCVsList(); loadVerifiedSkillsForForm(); }
-      if (tabId === "tab-communication") loadCommunicationData();
-      if (tabId === "tab-profile") loadProfileData();
-      if (tabId === "tab-ai-config") loadAIConfig();
-      if (tabId === "tab-backups") loadBackups();
+      if (loadData) {
+        if (tabId === "tab-dashboard") loadDashboardMetrics();
+        if (tabId === "tab-crm") loadCRM();
+        if (tabId === "tab-vacancies") { loadVacancies(); loadImportBatches(); loadSearchPreferences(); }
+        if (tabId === "tab-approvals") loadApprovalInbox();
+        if (tabId === "tab-execution") loadTasks();
+        if (tabId === "tab-cv-import") loadCVImportData();
+        if (tabId === "tab-master-cvs") { loadMasterCVsList(); loadVerifiedSkillsForForm(); }
+        if (tabId === "tab-communication") loadCommunicationData();
+        if (tabId === "tab-profile") loadProfileData();
+        if (tabId === "tab-ai-config") loadAIConfig();
+        if (tabId === "tab-backups") loadBackups();
+      }
     }
 
     function toggleAuthModal(show = null) {
@@ -2032,7 +2158,9 @@ Ejemplo:
         toggleAuthModal(false);
         showToast("Sesión autorizada correctamente");
         await checkAuthStatus();
-        loadInitialData();
+        const urlParams = new URLSearchParams(window.location.search);
+        const requestedTab = urlParams.get("tab") || (window.location.hash ? window.location.hash.substring(1) : "tab-dashboard");
+        switchTab(requestedTab);
       } catch (err) {
         showToast(err.message, true);
       }
@@ -2085,15 +2213,17 @@ Ejemplo:
 
     async function addSkill(e) {
       e.preventDefault();
+      const yearsValue = document.getElementById("skillYears").value.trim();
       const payload = {
         name: document.getElementById("skillName").value,
         category: document.getElementById("skillCategory").value,
         proficiency: document.getElementById("skillLevel").value,
-        years_experience: parseFloat(document.getElementById("skillYears").value) || 1.0,
+        years_experience: yearsValue === "" ? null : parseFloat(yearsValue),
         verification_status: "verified",
       };
       await apiRequest("/api/v1/profile/skills", { method: "POST", body: JSON.stringify(payload) });
       document.getElementById("skillName").value = "";
+      document.getElementById("skillYears").value = "";
       showToast("Habilidad registrada.");
       loadProfileData();
     }
@@ -2115,7 +2245,7 @@ Ejemplo:
     async function loadProfileData() {
       if (!authToken) return;
       try {
-        const data = await apiRequest("/api/v1/profile");
+        const data = await apiRequest("/api/v1/profile", { suppressToast: true });
         if (data && data.profile) {
           document.getElementById("profName").value = data.profile.full_name || "";
           document.getElementById("profEmail").value = data.profile.email || "";
@@ -2135,22 +2265,30 @@ Ejemplo:
           const sList = document.getElementById("skillsList");
           sList.innerHTML = data.skills.map(s => `
             <span class="hash-tag" style="padding: 0.35rem 0.6rem;">${s.name} (${s.proficiency || 'general'}) - ${s.years_experience !== null ? s.years_experience + 'a' : 's/d'}</span>
-          `).join("") || '<span style="color: var(--text-muted);">Sin habilidades.</span>';
+          `).join("") || '<span class="inline-empty">Aún no hay habilidades. Añade las que puedas respaldar con tu experiencia.</span>';
         }
         if (data && data.master_cvs) {
           const cvList = document.getElementById("cvsList");
           if (cvList) {
             cvList.innerHTML = data.master_cvs.map(c => `
-              <div style="background: #0f172a; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 0.5rem; border: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center;">
+              <div class="profile-cv-item" style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                   <strong>${c.name}</strong> - <span style="color: var(--text-muted);">${c.specialization}</span> (v${c.version})
                 </div>
                 ${c.is_active ? '<span class="badge badge-confirmed">★ Activo</span>' : ''}
               </div>
-            `).join("");
+            `).join("") || '<div class="inline-empty">Todavía no tienes CVs especializados. Puedes crear uno cuando tu perfil esté listo.</div>';
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        const stBadge = document.getElementById("lblProfileVerificationStatus");
+        if (stBadge && e.status === 404) {
+          stBadge.innerText = "Completa tu perfil";
+          stBadge.className = "badge badge-pending";
+        } else if (e.status !== 404) {
+          showToast("No se pudo cargar el perfil. Inténtalo de nuevo.", true);
+        }
+      }
     }
 
     // =========================================================================
@@ -2328,7 +2466,7 @@ Ejemplo:
 
     async function loadSources() {
       try {
-        const sources = await apiRequest("/api/v1/profile/sources");
+        const sources = await apiRequest("/api/v1/profile/sources", { suppressToast: true });
         const tb = document.querySelector("#tblSources tbody");
         if (!sources || sources.length === 0) {
           tb.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Sin fuentes importadas.</td></tr>';
@@ -2361,7 +2499,7 @@ Ejemplo:
 
     async function loadPendingReviewItems() {
       try {
-        const data = await apiRequest("/api/v1/profile/items/pending");
+        const data = await apiRequest("/api/v1/profile/items/pending", { suppressToast: true });
         if (!data) return;
 
         cachedPendingSkills = data.pending_skills || [];
@@ -2982,22 +3120,25 @@ Ejemplo:
 
     async function loadVacancies() {
       if (!authToken) return;
-      const vacancies = await apiRequest("/api/v1/vacancies");
-      allLoadedVacancies = vacancies || [];
-      renderVacanciesTable();
+      try {
+        const vacancies = await apiRequest("/api/v1/vacancies", { suppressToast: true });
+        allLoadedVacancies = vacancies || [];
+        renderVacanciesTable();
+      } catch (error) {
+        allLoadedVacancies = [];
+        const tableBody = document.querySelector("#tblVacancies tbody");
+        if (tableBody) {
+          tableBody.innerHTML = '<tr><td colspan="5" class="table-empty">No pudimos cargar las vacantes. Comprueba que la aplicación esté actualizada e inténtalo de nuevo.<br><button class="btn btn-outline btn-sm" type="button" style="margin-top:.75rem" onclick="loadVacancies()">Intentar de nuevo</button></td></tr>';
+        }
+        console.error("No se pudieron cargar las vacantes:", error);
+      }
     }
 
-    function filterVacanciesBySource(src) {
-      currentSourceFilter = src;
-      ["all", "chatgpt", "gemini", "both"].forEach(s => {
-        const btnId = "btnFilterSrc" + s.charAt(0).toUpperCase() + s.slice(1);
-        const btn = document.getElementById(btnId);
-        if (btn) {
-          if (s === src) btn.classList.add("active");
-          else btn.classList.remove("active");
-        }
-      });
-      renderVacanciesTable();
+    function openVacancyImport() {
+      const importDetails = document.getElementById("vacancyImportDetails");
+      if (!importDetails) return;
+      importDetails.open = true;
+      importDetails.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     function filterVacanciesBySource(src) {
@@ -3032,7 +3173,7 @@ Ejemplo:
 
       if (!list || list.length === 0) {
         if (countLbl) countLbl.innerText = "0 ofertas para este filtro";
-        tb.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">Sin vacantes para el filtro seleccionado.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="5" class="table-empty">Aún no hay vacantes en esta lista.<br><button class="btn btn-primary btn-sm" type="button" style="margin-top:.75rem" onclick="openVacancyImport()">Agregar vacantes</button></td></tr>';
         return;
       }
       if (countLbl) countLbl.innerText = `${list.length} ofertas disponibles (${allLoadedVacancies.length} total)`;
@@ -3482,13 +3623,14 @@ Ejemplo:
         const cards = await apiRequest(url);
         if (!cards || cards.length === 0) {
           cont.innerHTML = `
-            <div style="text-align: center; padding: 3rem 1.5rem; background: #131c2e; border: 1px dashed var(--card-border); border-radius: 0.5rem;">
-              <div style="font-size: 2rem; margin-bottom: 0.5rem;">📭</div>
-              <h3 style="margin-bottom: 0.5rem;">Bandeja vacía para este filtro</h3>
-              <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;">
-                No hay candidaturas ${currentInboxStatusFilter === 'pending_approval' ? 'pendientes de revisión' : 'en este estado'}. Importa vacantes de ChatGPT o Gemini y ejecuta el pipeline automático.
-              </p>
-              <button class="btn btn-primary" onclick="runAutoPipelineFromUI()">⚡ Preparar Candidaturas con Vacantes Disponibles</button>
+            <div class="empty-state">
+              <div class="empty-state-icon" aria-hidden="true">✓</div>
+              <h3>Todo al día por ahora</h3>
+              <p>No hay candidaturas ${currentInboxStatusFilter === 'pending_approval' ? 'pendientes de revisión' : 'en este estado'}. Cuando prepares una candidatura, podrás revisar sus datos y decidir si la apruebas.</p>
+              <div class="empty-state-actions">
+                <button class="btn btn-primary" onclick="switchTab('tab-vacancies')">Explorar vacantes</button>
+                <button class="btn btn-outline" onclick="switchTab('tab-profile')">Completar mi perfil</button>
+              </div>
             </div>
           `;
           return;
@@ -3742,12 +3884,25 @@ Ejemplo:
       if (!authToken) return;
       const entries = await apiRequest("/api/v1/crm/entries");
       const cols = ["pending_approval", "scheduled", "executing", "sent_confirmed", "requires_intervention", "rejected_by_user"];
+      const emptyCopy = {
+        pending_approval: "Las candidaturas por revisar aparecerán aquí.",
+        scheduled: "Aquí verás tus próximas ejecuciones aprobadas.",
+        executing: "No hay acciones en curso.",
+        sent_confirmed: "Las postulaciones completadas aparecerán aquí.",
+        requires_intervention: "No hay candidaturas que requieran atención.",
+        rejected_by_user: "Las candidaturas que descartes aparecerán aquí."
+      };
       cols.forEach(c => {
         document.getElementById(`col-${c}`).innerHTML = "";
         document.getElementById(`cnt-${c}`).innerText = "0";
       });
 
-      if (!entries) return;
+      if (!entries || entries.length === 0) {
+        cols.forEach(c => {
+          document.getElementById(`col-${c}`).innerHTML = `<div class="kanban-empty">${emptyCopy[c]}</div>`;
+        });
+        return;
+      }
       entries.forEach(e => {
         const colId = cols.includes(e.current_status) ? e.current_status : "requires_intervention";
         const container = document.getElementById(`col-${colId}`);
@@ -3767,6 +3922,11 @@ Ejemplo:
         `;
         container.appendChild(card);
       });
+      cols.forEach(c => {
+        if (document.getElementById(`cnt-${c}`).innerText === "0") {
+          document.getElementById(`col-${c}`).innerHTML = `<div class="kanban-empty">${emptyCopy[c]}</div>`;
+        }
+      });
     }
 
     async function loadTasks() {
@@ -3774,7 +3934,7 @@ Ejemplo:
       const tasks = await apiRequest("/api/v1/execution/tasks");
       const tb = document.querySelector("#tblTasks tbody");
       if (!tasks || tasks.length === 0) {
-        tb.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Sin tareas programadas.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="6" class="table-empty">Aún no hay tareas programadas. Al aprobar una candidatura, su ejecución aparecerá aquí.</td></tr>';
         return;
       }
       tb.innerHTML = tasks.map(t => `
@@ -3804,7 +3964,7 @@ Ejemplo:
     async function loadCommunicationData() {
       if (!authToken) return;
       try {
-        const profile = await apiRequest("/api/v1/communication");
+        const profile = await apiRequest("/api/v1/communication", { suppressToast: true });
         if (!profile) return;
         cachedCommProfile = profile;
 
@@ -3831,6 +3991,13 @@ Ejemplo:
         await generateCommPreview();
       } catch (e) {
         console.error("Error al cargar datos de comunicación:", e);
+        const statusBadge = document.getElementById("lblCommStatusBadge");
+        if (statusBadge && e.status === 400) {
+          statusBadge.innerText = "Completa tu perfil primero";
+          statusBadge.className = "badge badge-pending";
+        } else if (e.status !== 400) {
+          showToast("No se pudo cargar el estilo de comunicación. Inténtalo de nuevo.", true);
+        }
       }
     }
 
@@ -4375,8 +4542,9 @@ Ejemplo:
     async function loadDashboardMetrics() {
       if (!authToken) return;
       try {
-        const m = await apiRequest("/api/v1/reports/dashboard-metrics");
-        if (!m) return;
+        const m = await apiRequest("/api/v1/reports/dashboard-metrics", { suppressToast: true });
+        if (!m) throw new Error("No se recibieron indicadores.");
+        document.getElementById("dashboardLoadStatus").style.display = "none";
 
         document.getElementById("dashKpiScheduled").innerText = m.execution.scheduled_for_tomorrow;
         document.getElementById("dashKpiPendingApproval").innerText = m.candidacies.pending_approval;
@@ -4401,6 +4569,11 @@ Ejemplo:
         document.getElementById("dashSkillsVerified").innerText = m.profile.verified_skills;
       } catch (e) {
         console.error("Error loading dashboard metrics:", e);
+        ["dashKpiScheduled", "dashKpiPendingApproval", "dashKpiSentConfirmed", "dashKpiAIRemaining", "dashVacActive", "dashVacSuspect", "dashVacClosed", "dashVacTotal", "dashCandTotal", "dashCandApproved", "dashCandIntervention", "dashSkillsVerified"].forEach(id => {
+          const metric = document.getElementById(id);
+          if (metric) metric.innerText = "—";
+        });
+        document.getElementById("dashboardLoadStatus").style.display = "flex";
       }
     }
 
@@ -4747,29 +4920,24 @@ Ejemplo:
       });
     }
 
-    async function loadInitialData() {
-      await loadDashboardMetrics();
-      await loadProfileData();
-      await loadCVImportData();
-      await loadMasterCVsList();
-      await loadCommunicationData();
-      await loadVacancies();
-      await loadCRM();
-      await loadTasks();
-      await loadAIConfig();
-      await loadBackups();
+    function associateFormLabels() {
+      let generatedId = 0;
+      document.querySelectorAll("label:not([for])").forEach(label => {
+        const control = label.nextElementSibling;
+        if (!control || !control.matches("input, select, textarea")) return;
+        if (!control.id) control.id = `field-${++generatedId}`;
+        label.htmlFor = control.id;
+      });
     }
 
     window.addEventListener("DOMContentLoaded", async () => {
       mountPageIntros();
+      associateFormLabels();
       await checkAuthStatus();
       if (authToken) {
-        await loadInitialData();
         const urlParams = new URLSearchParams(window.location.search);
-        const requestedTab = urlParams.get("tab") || (window.location.hash ? window.location.hash.substring(1) : "");
-        if (requestedTab) {
-          switchTab(requestedTab);
-        }
+        const requestedTab = urlParams.get("tab") || (window.location.hash ? window.location.hash.substring(1) : "tab-dashboard");
+        switchTab(requestedTab);
       } else {
         toggleAuthModal(true);
       }
