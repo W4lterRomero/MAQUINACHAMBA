@@ -41,6 +41,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Simulación: {'ACTIVADA' if settings.simulation_mode else 'DESACTIVADA'}")
     logger.info(f"  Zona horaria: {settings.app_timezone}")
 
+    # Asegurar directorios de ejecución locales
+    for _d in ["data", "data/documents", "data/vault", "data/cv_exports", "backups", "logs"]:
+        Path(_d).mkdir(parents=True, exist_ok=True)
+
     # Inicializar base de datos
     await init_db()
     logger.info("  Base de datos inicializada.")

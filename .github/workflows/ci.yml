@@ -27,6 +27,10 @@ jobs:
           pip install -r backend/requirements.txt
           python -m playwright install --with-deps chromium
 
+      - name: Prepare local runtime directories
+        run: |
+          mkdir -p data/documents data/vault data/cv_exports backups logs
+
       - name: Run tests
         env:
           SIMULATION_MODE: "true"

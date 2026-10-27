@@ -14,6 +14,10 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_maquinachamba.db"
 os.environ["APP_ENV"] = "development"
 os.environ["APP_SECRET_KEY"] = "test-secret-key-not-for-production"
 
+# Asegurar directorios locales requeridos de ejecución (REQ-032)
+for _d in ["data", "data/documents", "data/vault", "data/cv_exports", "backups", "logs"]:
+    os.makedirs(_d, exist_ok=True)
+
 from backend.app.core.database import Base, engine, init_db, close_db
 # Importar todos los modelos para registro en Base.metadata
 from backend.app.modules.users.models import Tenant, User
