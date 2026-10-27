@@ -71,3 +71,104 @@ class EmailJobSearchConnector:
         except Exception as exc:
             logger.error(f"Error procesando correo de vacantes: {exc}")
             return None, [], f"Error procesando correo: {exc}"
+
+    @classmethod
+    async def sync_from_mailbox(
+        cls,
+        session: AsyncSession,
+        tenant_id: str,
+    ) -> Tuple[Optional[ImportBatch], List[Vacancy], str]:
+        """
+        Sincroniza reportes desde el buzón IMAP configurado (permisos de solo lectura).
+        Si no está configurado o está en simulación, reporta el estado sin fallar.
+        """
+        settings = get_settings()
+        if not settings.email_imap_host or not settings.email_address or not settings.email_app_password:
+            return (
+                None,
+                [],
+                "Servicio de correo no configurado (requiere EMAIL_IMAP_HOST, EMAIL_ADDRESS y EMAIL_APP_PASSWORD en .env).",
+            )
+
+        if settings.simulation_mode:
+            return (
+                None,
+                [],
+                "Modo simulación activo: no se establecen conexiones IMAP de red sin autorización explícita.",
+            )
+
+        import email
+        import imaplib
+        from email.header import decode_header
+
+        imported_all: List[Vacancy] = []
+        last_batch: Optional[ImportBatch] = None
+
+        try:
+            mail = imaplib.IMAP4_SSL(settings.email_imap_host)
+            mail.login(settings.email_address, settings.email_app_password)
+            mail.select("INBOX", readonly=True)
+
+            status_search, messages = mail.search(None, '(UNSEEN)')
+            if status_search != "OK" or not messages[0]:
+                mail.logout()
+                return None, [], "No se encontraron correos nuevos sin leer en la bandeja de entrada."
+
+            mail_ids = messages[0].split()
+            # Limitar a los 10 más recientes para evitar sobrecargas
+            for mid in mail_ids[-10:]:
+                res, data = mail.fetch(mid, "(RFC822)")
+                if res != "OK":
+                    continue
+                raw_email = data[0][1]
+                msg = email.message_from_bytes(raw_email)
+
+                # Decodificar asunto y remitente
+                subject_header = msg.get("Subject", "")
+                decoded_parts = decode_header(subject_header)
+                subject = ""
+                for part, encoding in decoded_parts:
+                    if isinstance(part, bytes):
+                        subject += part.decode(encoding or "utf-8", errors="replace")
+                    else:
+                        subject += str(part)
+
+                sender = msg.get("From", "")
+
+                # Extraer cuerpo de texto
+                body = ""
+                if msg.is_multipart():
+                    for subpart in msg.walk():
+                        if subpart.get_content_type() == "text/plain":
+                            payload = subpart.get_payload(decode=True)
+                            if payload:
+                                body = payload.decode("utf-8", errors="replace")
+                                break
+                else:
+                    payload = msg.get_payload(decode=True)
+                    if payload:
+                        body = payload.decode("utf-8", errors="replace")
+
+                if body:
+                    batch, vacs, _ = await cls.process_email_message(
+                        session=session,
+                        tenant_id=tenant_id,
+                        sender=sender,
+                        subject=subject,
+                        body=body,
+                    )
+                    if batch:
+                        last_batch = batch
+                        imported_all.extend(vacs)
+
+            mail.logout()
+            count = len(imported_all)
+            return (
+                last_batch,
+                imported_all,
+                f"Sincronización IMAP completada: {count} vacantes procesadas desde correos no leídos.",
+            )
+        except Exception as exc:
+            logger.error(f"Error sincronizando buzón IMAP: {exc}")
+            return None, [], f"Fallo al conectar con el servidor IMAP: {exc}"
+

@@ -165,11 +165,25 @@ class DurableExecutionDaemon:
                             tenant_id=s_tenant_id,
                             force_dry_run=False,
                         )
+                        cands_prepared = 0
+                        if res_search.get("jobs_new", 0) > 0:
+                            from backend.app.modules.approvals.pipeline import AutoApprovalPipeline
+                            pipe_res = await AutoApprovalPipeline.run_pipeline_for_vacancies(
+                                session=session,
+                                tenant_id=s_tenant_id,
+                            )
+                            cands_prepared = pipe_res.get("candidacies_prepared", 0)
+                            logger.info(
+                                f"[{self.worker_id}] Pipeline automático ejecutado tras búsqueda: "
+                                f"{cands_prepared} candidaturas preparadas para la bandeja de aprobación."
+                            )
+
                         search_processed.append({
                             "tenant_id": s_tenant_id,
                             "success": True,
                             "jobs_found": res_search.get("jobs_found", 0),
                             "jobs_new": res_search.get("jobs_new", 0),
+                            "candidacies_prepared": cands_prepared,
                         })
                     except Exception as s_exc:
                         logger.error(f"[{self.worker_id}] Error en búsqueda periódica de tenant '{s_tenant_id}': {s_exc}")

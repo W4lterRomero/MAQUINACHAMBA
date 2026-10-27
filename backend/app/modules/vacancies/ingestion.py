@@ -319,8 +319,17 @@ class JobIngestionService:
             reqs = it.get("requirements") or it.get("requisitos") or it.get("skills") or []
             if isinstance(reqs, list):
                 reqs_str = ", ".join(str(r) for r in reqs)
+                tech_reqs_list = [str(r).strip() for r in reqs if str(r).strip()]
             else:
                 reqs_str = str(reqs)
+                tech_reqs_list = [s.strip() for s in reqs_str.split(",") if s.strip()]
+
+            # Preservar campos explícitos de JSON sin pérdida (REQ Tarea 2.3)
+            allowed_cntrs = it.get("allowed_countries")
+            if isinstance(allowed_cntrs, str):
+                allowed_cntrs = [c.strip() for c in allowed_cntrs.split(",") if c.strip()]
+            elif not isinstance(allowed_cntrs, list):
+                allowed_cntrs = None
 
             vacancies.append({
                 "company_name": comp,
@@ -328,6 +337,11 @@ class JobIngestionService:
                 "source_url": url,
                 "location": loc,
                 "remote_type": it.get("remote_type", "remote"),
+                "allowed_countries": allowed_cntrs,
+                "experience_level": it.get("experience_level"),
+                "english_level": it.get("english_level"),
+                "technical_requirements": tech_reqs_list,
+                "unknown_fields": it.get("unknown_fields") if isinstance(it.get("unknown_fields"), list) else None,
                 "salary_min": it.get("salary_min"),
                 "salary_max": it.get("salary_max"),
                 "salary_currency": it.get("salary_currency", "USD"),
@@ -490,31 +504,48 @@ class JobIngestionService:
 
             loc_raw = r_job.get("location", "Remoto")
             desc_raw = r_job.get("description", "")
-            remote_type, clean_loc, allowed_countries = cls.extract_allowed_countries_and_remote(loc_raw, desc_raw)
+            ext_remote_type, clean_loc, ext_allowed_countries = cls.extract_allowed_countries_and_remote(loc_raw, desc_raw)
+            remote_type = r_job.get("remote_type") or ext_remote_type
+
+            # Preservar países autorizados si fueron especificados en la fuente
+            explicit_countries = r_job.get("allowed_countries")
+            if explicit_countries and isinstance(explicit_countries, list):
+                allowed_countries = list(dict.fromkeys(explicit_countries + ext_allowed_countries))
+            else:
+                allowed_countries = ext_allowed_countries
 
             # Salario
             sal_min = r_job.get("salary_min")
             sal_max = r_job.get("salary_max")
-            sal_curr = r_job.get("salary_currency", "USD")
+            sal_curr = r_job.get("salary_currency") or "USD"
             if sal_min is None and r_job.get("salary_text"):
                 sal_min, sal_max, sal_curr = cls.parse_salary_range(r_job["salary_text"])
 
             # Requisitos y nivel
             reqs_text = r_job.get("requirements_text", "")
-            tech_reqs = [
-                s.strip() for s in re.split(r"[,;•\n]+", reqs_text) if s.strip() and len(s.strip()) > 1
-            ]
-            exp_level = cls.extract_experience_level(f"{title} {desc_raw} {reqs_text}")
+            explicit_tech_reqs = r_job.get("technical_requirements")
+            if explicit_tech_reqs and isinstance(explicit_tech_reqs, list):
+                tech_reqs = explicit_tech_reqs
+            else:
+                tech_reqs = [
+                    s.strip() for s in re.split(r"[,;•\n]+", reqs_text) if s.strip() and len(s.strip()) > 1
+                ]
+
+            explicit_exp = r_job.get("experience_level")
+            if explicit_exp and explicit_exp != "unknown":
+                exp_level = explicit_exp
+            else:
+                exp_level = cls.extract_experience_level(f"{title} {desc_raw} {reqs_text}")
 
             snippet = r_job.get("original_snippet", "")
-            unknown_fields = []
-            if not r_job.get("salary_text") and sal_min is None:
+            unknown_fields = list(r_job.get("unknown_fields") or [])
+            if not r_job.get("salary_text") and sal_min is None and "salary" not in unknown_fields:
                 unknown_fields.append("salary")
-            if not tech_reqs:
+            if not tech_reqs and "technical_requirements" not in unknown_fields:
                 unknown_fields.append("technical_requirements")
-            if exp_level == "unknown":
+            if exp_level == "unknown" and "experience_level" not in unknown_fields:
                 unknown_fields.append("experience_level")
-            if not allowed_countries:
+            if not allowed_countries and "allowed_countries" not in unknown_fields:
                 unknown_fields.append("allowed_countries")
 
             # Análisis determinista de fraude y vacante cerrada
