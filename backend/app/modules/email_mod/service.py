@@ -8,12 +8,14 @@ Reglas y directrices de seguridad:
 """
 
 from datetime import date, datetime, timedelta, timezone
+import html
 import json
 import logging
 import smtplib
 from typing import Any, Dict, List, Optional
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,8 +65,16 @@ class EmailReportService:
         cand_res = await session.execute(cand_stmt)
         cand_counts: Dict[str, int] = {row[0]: row[1] for row in cand_res.all()}
 
-        # 3. Tareas programadas para la ventana de mañana
-        today = datetime.now(timezone.utc).date()
+        # 3. Tareas programadas para la ventana de mañana (según la zona horaria del tenant)
+        t_stmt = select(Tenant).where(Tenant.id == tenant_id)
+        t_res = await session.execute(t_stmt)
+        tenant = t_res.scalar_one_or_none()
+        tz_name = tenant.timezone if (tenant and tenant.timezone) else settings.app_timezone
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = timezone.utc
+        today = datetime.now(tz).date()
         tomorrow = today + timedelta(days=1)
         sched_stmt = select(func.count(ScheduledTask.id)).where(
             and_(
@@ -100,13 +110,15 @@ class EmailReportService:
         )
         ai_res = await session.execute(ai_stmt)
         ai_cfg = ai_res.scalars().first()
+        reserved = getattr(ai_cfg, "reserved_budget_usd", 0.0) if ai_cfg else 0.0
         ai_info = {
             "configured": ai_cfg is not None,
             "provider": ai_cfg.provider if ai_cfg else "none",
             "model": ai_cfg.model if ai_cfg else "none",
             "monthly_budget_usd": ai_cfg.monthly_budget_usd if ai_cfg else 0.0,
             "current_month_usage_usd": ai_cfg.current_month_usage_usd if ai_cfg else 0.0,
-            "remaining_budget_usd": max(0.0, ai_cfg.monthly_budget_usd - ai_cfg.current_month_usage_usd) if ai_cfg else 0.0,
+            "reserved_budget_usd": reserved,
+            "remaining_budget_usd": max(0.0, ai_cfg.monthly_budget_usd - ai_cfg.current_month_usage_usd - reserved) if ai_cfg else 0.0,
         }
 
         return {
@@ -149,13 +161,23 @@ class EmailReportService:
         metrics = await cls.get_dashboard_metrics(session, tenant_id)
 
         # Obtener datos del tenant y usuario
+        t_stmt = select(Tenant).where(Tenant.id == tenant_id)
+        t_res = await session.execute(t_stmt)
+        tenant = t_res.scalar_one_or_none()
+        tz_name = tenant.timezone if (tenant and tenant.timezone) else settings.app_timezone
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = timezone.utc
+
         u_stmt = select(User).where(User.tenant_id == tenant_id)
         u_res = await session.execute(u_stmt)
         user = u_res.scalars().first()
         user_name = user.full_name if user else "Candidato"
         user_email = user.email if user else "usuario@localhost"
+        user_name_escaped = html.escape(user_name)
 
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_str = datetime.now(tz).strftime("%Y-%m-%d")
         sim_tag = "[SIMULACIÓN] " if settings.simulation_mode else ""
         subject = f"{sim_tag}Máquina de Chamba — Resumen Diario de Búsqueda Laboral ({today_str})"
 
@@ -206,7 +228,7 @@ class EmailReportService:
             <div class="header">
               <span class="badge-sim">{'SIMULACIÓN LOCAL' if settings.simulation_mode else 'OPERACIÓN REAL'}</span>
               <h2 style="margin: 10px 0 0 0; color: #f8fafc;">Resumen Diario de Búsqueda Laboral</h2>
-              <div style="font-size: 13px; color: #94a3b8;">Fecha: {today_str} | Candidato: {user_name}</div>
+              <div style="font-size: 13px; color: #94a3b8;">Fecha: {today_str} | Candidato: {user_name_escaped}</div>
             </div>
             <div class="stat-grid">
               <div class="stat-box">
@@ -262,7 +284,7 @@ class EmailReportService:
 
         if settings.simulation_mode:
             logger.info(
-                f"[SIMULACIÓN] Reporte diario de correo generado para {recipient}: {report_data['subject']}"
+                f"[SIMULACIÓN] Reporte diario de correo generado para tenant_id={tenant_id}: {report_data['subject']}"
             )
             return {
                 "status": "simulated_success",

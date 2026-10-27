@@ -116,8 +116,9 @@ def test_auto_generated_local_secret_key_persisted(tmp_path, monkeypatch):
     assert fake_secret_file.exists()
 
     # Comprobar permisos 0600 en Linux/Unix
-    file_stat = fake_secret_file.stat()
-    assert stat.S_IMODE(file_stat.st_mode) == 0o600
+    if os.name == "posix":
+        file_stat = fake_secret_file.stat()
+        assert stat.S_IMODE(file_stat.st_mode) == 0o600
 
     # Segunda invocación lee la misma clave persistida sin regenerar
     key2 = resolve_app_secret_key(None, secret_path=fake_secret_file)
@@ -129,6 +130,8 @@ def test_insecure_permissions_0644_rejected(tmp_path):
     Dictamen Work sobre a1d47ed: rechazar archivos preexistentes con permisos inseguros (ej. 0644).
     Falla cerrado inmediatamente sin aceptar el archivo.
     """
+    if os.name != "posix":
+        pytest.skip("POSIX file permission bits not supported on Windows")
     fake_secret = tmp_path / "insecure_0644.key"
     fake_secret.write_text("dummy-secret-key-with-sufficient-length-here", encoding="utf-8")
     fake_secret.chmod(0o644)
@@ -144,6 +147,8 @@ def test_symlink_secret_file_rejected(tmp_path):
     Dictamen Work sobre a1d47ed: rechazar enlaces simbólicos que apunten a una clave secreta.
     Falla cerrado inmediatamente.
     """
+    if os.name != "posix":
+        pytest.skip("Symlink creation requires elevated privileges on Windows")
     real_file = tmp_path / "real.key"
     real_file.write_text("dummy-secret-key-with-sufficient-length-here", encoding="utf-8")
     real_file.chmod(0o600)
@@ -194,9 +199,10 @@ def test_concurrent_process_startup_atomic_and_shared(tmp_path):
     assert key1 == key2
     assert len(key1) >= 32
 
-    # Comprobar permisos del archivo resultante (0600)
-    file_stat = secret_file.stat()
-    assert stat.S_IMODE(file_stat.st_mode) == 0o600
+    # Comprobar permisos del archivo resultante (0600) en POSIX
+    if os.name == "posix":
+        file_stat = secret_file.stat()
+        assert stat.S_IMODE(file_stat.st_mode) == 0o600
 
     # Comprobar que el archivo contiene la clave exacta sin truncar
     file_content = secret_file.read_text(encoding="utf-8").strip()

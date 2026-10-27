@@ -189,13 +189,13 @@ async def test_daemon_executes_task_at_authorized_time(setup_db):
         assert t_final.status == "completed"
 
         c_final = await session.get(Candidacy, cand.id)
-        assert c_final.status == "sent_confirmed"
+        assert c_final.status == "simulated_success"
 
         crm_res = await session.execute(
             select(CRMEntry).where(CRMEntry.candidacy_id == cand.id)
         )
         crm_final = crm_res.scalar_one()
-        assert crm_final.current_status == "sent_confirmed"
+        assert crm_final.current_status == "simulated_success"
 
 
 @pytest.mark.asyncio

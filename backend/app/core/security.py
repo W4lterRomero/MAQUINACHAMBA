@@ -8,7 +8,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from ipaddress import ip_address, ip_network
-from typing import Optional
+from typing import Optional, Any
 from urllib.parse import urlparse
 
 from pydantic import BaseModel
@@ -60,15 +60,15 @@ class AuthorizationPolicy:
         Un adaptador sin capacidades de simulación queda estrictamente bloqueado si simulation_mode=True.
         """
         if simulation_mode:
-            # En modo simulación, SOLO se permiten adaptadores explícitamente simulados
-            if not is_simulation_adapter and adapter_mode != "simulation_only":
+            # En modo simulación, se permiten adaptadores de simulación o asistidos (cero llamadas externas)
+            if not is_simulation_adapter and adapter_mode not in ("simulation_only", "assisted_only"):
                 return False, (
                     "Bloqueo de seguridad: Modo simulación activo. "
-                    "El adaptador no es de simulación y generaría efectos externos reales no autorizados."
+                    "El adaptador no es de simulación ni asistido y generaría efectos externos reales no autorizados."
                 )
-            return True, "Modo simulación verificado: el adaptador opera en modo simulado seguro."
+            return True, "Modo seguro verificado: el adaptador opera en modo simulado o asistido."
 
-        return True, "Modo real habilitado."
+        return True, "Modo de ejecución habilitado."
 
     @classmethod
     def can_execute_candidacy(
@@ -97,21 +97,82 @@ class AuthorizationPolicy:
 
         return True, "Autorizada para ejecución."
 
-    @staticmethod
-    def can_create_account(
+    @classmethod
+    def validate_portal_action_authorization(
+        cls,
+        auth_record: Optional[Any],
         portal_name: str,
-        creation_authorized: bool,
+        requested_action: str,
+        simulation_mode: bool = False,
     ) -> tuple[bool, str]:
         """
-        Verifica si se puede crear una cuenta en un portal.
-        La aprobación de una candidatura NO autoriza crear cuenta.
+        P0 - Bloqueador 4 y 6: Valida un registro de autorización persistido.
+        - Requiere registro no nulo.
+        - Comprueba que el portal y la acción coincidan exactamente.
+        - Comprueba vigencia y no-revocación.
+        - 'read_email' o 'search_jobs' NUNCA autorizan 'register_account' ni 'submit_application'.
+        - Si requested_action == 'submit_application' y simulation_mode=True, rechaza.
         """
-        if not creation_authorized:
+        if auth_record is None:
             return False, (
-                f"No hay autorización para crear cuenta en {portal_name}. "
-                "Requiere autorización específica del usuario."
+                f"No existe autorización persistida para '{requested_action}' en el portal '{portal_name}'. "
+                "Un parámetro booleano suministrado por el llamador no es evidencia suficiente."
             )
-        return True, f"Creación de cuenta autorizada en {portal_name}."
+
+        p_name = getattr(auth_record, "portal_name", "")
+        if p_name.lower() != portal_name.lower():
+            return False, f"La autorización pertenece al portal '{p_name}', no a '{portal_name}'."
+
+        rec_action = getattr(auth_record, "action", "")
+        if rec_action != requested_action:
+            return False, (
+                f"Permiso insuficiente: la autorización es para '{rec_action}', la cual "
+                f"NO otorga permiso para '{requested_action}'. Los permisos están estrictamente separados."
+            )
+
+        if not getattr(auth_record, "authorized", False):
+            return False, f"La autorización para '{requested_action}' en '{portal_name}' está inactiva."
+
+        if getattr(auth_record, "revoked_at", None) is not None:
+            return False, f"La autorización para '{requested_action}' en '{portal_name}' fue revocada."
+
+        expires_at = getattr(auth_record, "expires_at", None)
+        if expires_at is not None:
+            now = datetime.now(timezone.utc)
+            if now > expires_at:
+                return False, f"La autorización para '{requested_action}' en '{portal_name}' ha expirado."
+
+        if requested_action == "submit_application" and simulation_mode:
+            return False, "Modo simulación activo. Envíos externos reales se mantienen estrictamente desactivados."
+
+        return True, f"Acción '{requested_action}' en '{portal_name}' autorizada por registro persistido."
+
+    @classmethod
+    def can_create_account(
+        cls,
+        portal_name: str,
+        auth_record: Optional[Any] = None,
+        creation_authorized: Optional[bool] = None,
+    ) -> tuple[bool, str]:
+        """
+        P0 - Bloqueador 4 y 6: Verifica si se puede crear una cuenta en un portal.
+        Exige autorización persistida específica para 'register_account'.
+        Rechaza banderas booleanas en memoria si no hay registro persistido que las respalde.
+        """
+        if auth_record is not None:
+            return cls.validate_portal_action_authorization(
+                auth_record=auth_record,
+                portal_name=portal_name,
+                requested_action="register_account",
+            )
+        # Si no se suministra registro persistido, un booleano solo es insuficiente
+        if creation_authorized is True:
+            return False, (
+                f"Autorización rechazada para crear cuenta en {portal_name}: "
+                "un booleano en memoria suministrado por el llamador no es evidencia suficiente. "
+                "Se requiere registro persistido en base de datos."
+            )
+        return False, f"No hay autorización persistida para crear cuenta en {portal_name}."
 
     @staticmethod
     def can_send_follow_up(
@@ -147,11 +208,12 @@ BLOCKED_HOSTS = {
 }
 
 
-def validate_url(url: str) -> tuple[bool, str]:
+def validate_url(url: str, allow_localhost: bool = False) -> tuple[bool, str]:
     """
     Validación preliminar sin red; no autoriza por sí sola una conexión.
     El transporte debe validar DNS, fijar la IP pública validada conservando
     Host/TLS y repetir la política para cada redirección.
+    Si allow_localhost=True (modo desarrollo/testing controlado), se permite loopback local.
     """
     try:
         if any(ord(char) <= 32 or ord(char) == 127 for char in url) or "\\" in url:
@@ -172,15 +234,19 @@ def validate_url(url: str) -> tuple[bool, str]:
 
     # Check blocked hosts
     hostname = hostname.lower().rstrip(".")
-    if (hostname in BLOCKED_HOSTS or hostname == "localhost"
-            or hostname.endswith((".localhost", ".local", ".internal"))
-            or "%" in hostname):
-        return False, f"Host bloqueado: {hostname}"
+    is_loopback = (hostname in ("localhost", "127.0.0.1", "::1") or hostname.endswith(".localhost"))
+    if not (allow_localhost and is_loopback):
+        if (hostname in BLOCKED_HOSTS or hostname == "localhost"
+                or hostname.endswith((".localhost", ".local", ".internal"))
+                or "%" in hostname):
+            return False, f"Host bloqueado: {hostname}"
 
     # Check if hostname is an IP address in blocked range
     try:
         ip = ip_address(hostname)
         effective_ip = getattr(ip, "ipv4_mapped", None) or ip
+        if allow_localhost and effective_ip.is_loopback:
+            return True, "Loopback local permitido para testing."
         if not effective_ip.is_global or effective_ip.is_multicast:
             return False, "IP no pública."
         for network in BLOCKED_IP_RANGES:

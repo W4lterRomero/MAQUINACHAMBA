@@ -29,13 +29,18 @@ from backend.app.core.database import Base, import_all_models
 import_all_models()
 target_metadata = Base.metadata
 
-# Override URL with application configuration
-app_settings = get_settings()
-db_url = app_settings.database_url
-if db_url.startswith("sqlite:///"):
-    db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
-
-config.set_main_option("sqlalchemy.url", db_url)
+# Override URL with application configuration if not explicitly configured in Config
+explicit_url = config.get_main_option("sqlalchemy.url")
+if not explicit_url or "maquinachamba.db" in explicit_url:
+    app_settings = get_settings()
+    db_url = app_settings.database_url
+    if db_url.startswith("sqlite:///"):
+        db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+    config.set_main_option("sqlalchemy.url", db_url)
+else:
+    if explicit_url.startswith("sqlite:///") and "aiosqlite" not in explicit_url:
+        explicit_url = explicit_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+    config.set_main_option("sqlalchemy.url", explicit_url)
 
 
 def run_migrations_offline() -> None:

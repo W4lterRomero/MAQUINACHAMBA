@@ -122,6 +122,8 @@ def import_all_models():
     import backend.app.modules.approvals.models  # noqa: F401
     import backend.app.modules.crm.models  # noqa: F401
     import backend.app.modules.secrets.models  # noqa: F401
+    import backend.app.modules.audit.models  # noqa: F401
+    import backend.app.modules.portals.models  # noqa: F401
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

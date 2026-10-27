@@ -146,3 +146,58 @@ class VacancyIntegrityService:
             "closure_reason": closure_reason,
             "is_active": not is_closed,
         }
+
+    @classmethod
+    def validate_vacancy_readiness_for_application(cls, vacancy: Any) -> Tuple[bool, str]:
+        """
+        Valida que una vacante sea una oportunidad real, con enlace válido y verificada (P0 Item 8).
+        Impide estrictamente que vacantes de muestra, enlaces de prueba o vacantes no verificadas
+        pasen a la fase de postulación o aprobación como candidaturas reales.
+        """
+        # 1. Comprobar si es vacante de muestra o ficticia
+        is_real = getattr(vacancy, "is_real_search_result", True)
+        source = (getattr(vacancy, "source", "") or "").lower()
+        company = (getattr(vacancy, "company_name", "") or "").lower()
+        title = (getattr(vacancy, "job_title", "") or "").lower()
+
+        if is_real is False:
+            return False, "La vacante está marcada explícitamente como dato de muestra (is_real_search_result=False)."
+
+        if source in ("sample", "mock", "test", "demo") or "sample" in company or "muestra" in company or "ejemplo" in company:
+            return False, "La vacante proviene de una fuente o entidad catalogada como muestra o prueba."
+
+        # 2. Comprobar validez del enlace original
+        url = getattr(vacancy, "source_url", "") or ""
+        if not url or not url.strip():
+            return False, "La vacante no posee una URL o enlace de postulación."
+
+        from backend.app.core.security import validate_url
+        is_safe, reason = validate_url(url, allow_localhost=True)
+        if not is_safe:
+            return False, f"El enlace de la vacante no es seguro o válido: {reason}"
+
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(url)
+            if "unverified-search-job" in url or "placeholder" in url:
+                return False, f"El enlace '{url}' es un marcador de posición de vacante no verificada o sin URL real."
+            if not parsed.scheme.startswith("http"):
+                return False, f"El esquema del enlace '{parsed.scheme}' no es HTTP ni HTTPS válido."
+        except Exception as e:
+            return False, f"Error al analizar el enlace de la vacante: {e}"
+
+        # 3. Comprobar estado de verificación
+        ver_status = getattr(vacancy, "verification_status", "pending_verification")
+        if ver_status not in ("verified", "confirmed"):
+            return False, f"La vacante no cuenta con verificación confirmada (estado: '{ver_status}'). Extraer ≠ verificar."
+
+        # 4. Comprobar vigencia y señales de fraude
+        if not getattr(vacancy, "is_active", True):
+            closure = getattr(vacancy, "closure_reason", "Cerrada")
+            return False, f"La vacante se encuentra inactiva o cerrada: {closure}"
+
+        signals = getattr(vacancy, "fraud_signals", []) or []
+        if any(s.get("severity") == "high" for s in signals):
+            return False, "La vacante presenta señales de riesgo o fraude de alta gravedad."
+
+        return True, "Vacante verificada y lista para postulación."

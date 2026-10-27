@@ -18,7 +18,10 @@ import io
 import multiprocessing as mp
 import os
 import re
-import resource
+try:
+    import resource
+except ImportError:
+    resource = None
 import threading
 import time
 from typing import Any, Dict, List, Optional
