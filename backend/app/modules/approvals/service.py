@@ -8,12 +8,12 @@ import hashlib
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.clock import Clock, get_clock
 from backend.app.core.security import hash_content
-from backend.app.modules.profile.models import UserProfile, Skill, Experience
+from backend.app.modules.profile.models import UserProfile, Skill, Experience, ProfessionalSource
 from backend.app.modules.cv.models import MasterCV
 from backend.app.modules.cv.generator import CVDocumentGenerator
 from backend.app.modules.vacancies.models import Vacancy
@@ -73,13 +73,14 @@ class ApprovalService:
         elif profile.location_city:
             location_str = profile.location_city
 
-        # Recuperar habilidades verificadas
+        # Recuperar habilidades verificadas (excluyendo datos sintéticos de demostración)
         s_stmt = (
             select(Skill)
             .where(
                 and_(
                     Skill.tenant_id == tenant_id,
                     Skill.verification_status == "verified",
+                    or_(Skill.context_type != "synthetic_demo", Skill.context_type.is_(None)),
                 )
             )
             .order_by(Skill.created_at.asc())
@@ -114,13 +115,15 @@ class ApprovalService:
             for s in skills_to_include
         ]
 
-        # Recuperar experiencia laboral verificada
+        # Recuperar experiencia laboral verificada (excluyendo fuentes sintéticas de demostración)
         e_stmt = (
             select(Experience)
+            .outerjoin(ProfessionalSource, Experience.source_id == ProfessionalSource.id)
             .where(
                 and_(
                     Experience.tenant_id == tenant_id,
                     Experience.verification_status == "verified",
+                    or_(ProfessionalSource.source_type != "github_simulation", ProfessionalSource.source_type.is_(None)),
                 )
             )
             .order_by(Experience.start_date.desc().nullslast())

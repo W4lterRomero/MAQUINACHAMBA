@@ -60,15 +60,15 @@ class AuthorizationPolicy:
         Un adaptador sin capacidades de simulación queda estrictamente bloqueado si simulation_mode=True.
         """
         if simulation_mode:
-            # En modo simulación, SOLO se permiten adaptadores explícitamente simulados
-            if not is_simulation_adapter and adapter_mode != "simulation_only":
+            # En modo simulación, se permiten adaptadores de simulación o asistidos (cero llamadas externas)
+            if not is_simulation_adapter and adapter_mode not in ("simulation_only", "assisted_only"):
                 return False, (
                     "Bloqueo de seguridad: Modo simulación activo. "
-                    "El adaptador no es de simulación y generaría efectos externos reales no autorizados."
+                    "El adaptador no es de simulación ni asistido y generaría efectos externos reales no autorizados."
                 )
-            return True, "Modo simulación verificado: el adaptador opera en modo simulado seguro."
+            return True, "Modo seguro verificado: el adaptador opera en modo simulado o asistido."
 
-        return True, "Modo real habilitado."
+        return True, "Modo de ejecución habilitado."
 
     @classmethod
     def can_execute_candidacy(

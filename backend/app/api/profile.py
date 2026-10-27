@@ -25,6 +25,7 @@ class GitHubImportRequest(BaseModel):
     username: str
     access_token: Optional[str] = None
     max_repos: int = 5
+    raw_json_repos: Optional[List[Dict[str, Any]]] = None
 
 
 class SkillCreate(BaseModel):
@@ -659,6 +660,7 @@ async def import_github_repositories(
             username=payload.username,
             token=payload.access_token,
             max_repos=payload.max_repos,
+            raw_json_repos=payload.raw_json_repos,
         )
         await session.commit()
         return result
@@ -677,7 +679,7 @@ async def list_sources(
     p_res = await session.execute(
         select(UserProfile).where(UserProfile.tenant_id == tenant_id)
     )
-    profile = p_res.scalar_one_or_none()
+    profile = p_res.scalars().first()
     if not profile:
         raise HTTPException(status_code=404, detail="Perfil no configurado.")
 
